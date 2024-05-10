@@ -21,6 +21,8 @@ else
     encoder, decoder = read_autoencoder(file_name)
 end
 ##
+#################### AUTOENCODER CHECK ####################
+
 test_sample = data[:, rand(1:size(data, 2))]
 autoencoder = Flux.Chain(encoder, decoder)
 reconstructed = Flux.cpu(autoencoder(test_sample))
@@ -32,8 +34,9 @@ p = Plots.plot(
 )
 display(p)
 
-
 ##
+#################### CLUSTERING ####################
+
 variance_exploding(t; σ_min = 0.01, σ_max = 1.0) = @. σ_min * (σ_max/σ_min)^t
 g(t; σ_min=0.01, σ_max=1.0) = σ_min * (σ_max/σ_min)^t * sqrt(2*log(σ_max/σ_min))
 
@@ -45,7 +48,6 @@ obs = (encoder(data) .+ 1) ./ 2
 # kde_obs = kde(obs[3,:])
 # plot(kde_obs.x, kde_obs.density, color=:blue, label="Observed")
 
-
 μ = repeat(obs, 1, 1)
 
 averages_values, centers_values, Nc_values = f_tilde(σ_values, μ; prob=0.001, do_plot=true, conv_param=0.001)
@@ -55,6 +57,8 @@ ii = 1
 k_norm = [norm(averages_values[ii][:,i]) for i in 1:Nc_values[ii]]
 Plots.scatter(centers_values[ii][1,:], centers_values[ii][2,:], centers_values[ii][3,:], marker_z=k_norm, color=:viridis, markersize=1)
 ##
+#################### TRAINING WITH CLUSTERING LOSS ####################
+
 Dim = size(μ)[1]
 M_averages_values = maximum(hcat(averages_values...))
 m_averages_values = minimum(hcat(averages_values...))
@@ -73,6 +77,7 @@ nn_clustered, loss_clustered = train_clustered(data_clustered, 250, 128, [Dim+1,
 nnc(x, t) = .- nn_clustered(Flux.Float32.([x..., t]))[:] .* (M_averages_values .- m_averages_values) .- m_averages_values
 Plots.plot(loss_clustered)
 ##
+#################### TRAINING WITH VANILLA LOSS ####################
 
 nn_vanilla, loss_vanilla = train_vanilla(obs, 100, 128, [Dim+1, 128, 64, Dim], variance_exploding; activation=tanh)
 nnv(x, t) = nn_vanilla(Flux.Float32.([x..., t]))[:]
