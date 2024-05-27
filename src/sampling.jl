@@ -2,7 +2,7 @@ function sample(Dim, nn, n_samples, n_diffs, σ, g)
     dt = 1.0 / n_diffs
     ens = zeros(Dim, n_samples)
     for i in 1:n_samples
-        xOld = randn(Dim)
+        xOld = σ(1)*randn(Dim)
         for t in 1:n_diffs
             t_diff = (n_diffs - t + 1) / n_diffs
             s = σ(t_diff)

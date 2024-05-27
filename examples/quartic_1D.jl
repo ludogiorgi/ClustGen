@@ -22,7 +22,6 @@ function evolve(x0, system, timesteps, Δt, res, σ)
 end
 
 forcing(x) = @. x * (1 - x^2)
-variance_exploding(t; σ_min = 0.01, σ_max = 5.0) = @. σ_min * (σ_max/σ_min)^t
 
 evolve(x0, forcing, timesteps, σ; Δt=0.01, res=100) = evolve(x0, forcing, timesteps, Δt, res, σ)
 
@@ -63,8 +62,8 @@ function f_true(z,sigma; tol=1e-8)
     return - num / den / sigma
 end
 
-variance_exploding(t; σ_min = 0.01, σ_max = 1.0) = @. σ_min * (σ_max/σ_min)^t
-g(t; σ_min=0.01, σ_max=1.0) = σ_min * (σ_max/σ_min)^t * sqrt(2*log(σ_max/σ_min))
+variance_exploding(t; σ_min = 0.01, σ_max = 5.0) = @. σ_min * (σ_max/σ_min)^t
+g(t; σ_min=0.01, σ_max=5.0) = σ_min * (σ_max/σ_min)^t * sqrt(2*log(σ_max/σ_min))
 
 n_diffs = 20
 diff_times = [i/n_diffs for i in 1:n_diffs]
@@ -123,7 +122,7 @@ Plots.hline!([rmse])
 ##
 ####################### TRAINING WITH VANILLA LOSS #######################
 
-nn_vanilla, loss_vanilla = train_vanilla(obs[:,1:10:end], 250, 128, [Dim+1, 64, 32, Dim], variance_exploding; activation=tanh)
+nn_vanilla, loss_vanilla = train_vanilla(obs[:,1:10:end], 1, 1000, [Dim+1, 64, 32, Dim], variance_exploding; activation=tanh)
 cluster_loss = check_loss(obs, nnc, variance_exploding)
 nnv(x, t) = nn_vanilla(Flux.Float32.([x..., t]))[:]
 Plots.plot(loss_vanilla)
@@ -160,6 +159,84 @@ ens_vanilla = sample(Dim, nnv, n_ens, n_diffs_sampling, variance_exploding, g)
 kde_clustered = kde(ens_clustered[1,:])
 kde_vanilla = kde(ens_vanilla[1,:])
 
-plot(kde_clustered.x, kde_clustered.density, color=:red, label="Clustered")
-plot!(kde_vanilla.x, kde_vanilla.density, color=:green, label="Vanilla")
-plot!(kde_obs.x, kde_obs.density, color=:blue, label="Observed")
+plot(kde_clustered.x, kde_clustered.density, color=:red, label="Clustered", xlims=(-0.5,1.5))
+plot!(kde_vanilla.x, kde_vanilla.density, color=:green, label="Vanilla", xlims=(-0.5,1.5))
+plot!(kde_obs.x, kde_obs.density, color=:blue, label="Observed", xlims=(-0.5,1.5))
+##
+# ######################### LARGE DEVIATIONS #########################
+
+# function evolve_f(x0, n_diffs, g, diff_stop)
+#     dt = 1.0 / n_diffs
+#     x_f = Array{Float64,2}(undef, 1, diff_stop)
+#     x_f[:, 1] = x0
+#     for i = 2:diff_stop
+#         t_diff = i * dt
+#         x_old = x_f[:, i-1]
+#         x_f[:, i] = x_old + g(t_diff) * randn(1) * sqrt(dt)
+#     end
+#     return x_f
+# end
+
+# function evolve_r(x1, n_diffs, g, σ, nn, diff_stop)
+#     dt = 1.0 / n_diffs
+#     x_r = Array{Float64,2}(undef, 1, diff_stop)
+#     x_r[:, 1] = x1
+#     for i = 2:diff_stop
+#         t_diff = (diff_stop - i + 1) * dt
+#         x_old = x_r[:, i-1]
+#         s = σ(t_diff)
+#         score = nn(x_old, t_diff) ./ s
+#         x_r[:, i] = x_old + score * g(t_diff)^2 * dt + g(t_diff) * randn(1) * sqrt(dt)
+#     end
+#     return x_r[:, 1:end]
+# end
+
+# n_diffs = 1000
+# n_ens = 10000
+# diff_stop = 1000
+# ens_r = zeros(n_ens, diff_stop)
+# #ens_r_vanilla = zeros(n_ens, n_diffs)
+# for i in ProgressBar(1:n_ens)
+#     start_r = [variance_exploding(diff_stop/n_diffs)*randn()]
+#     ens_r[i,:] = evolve_r(start_r, n_diffs, g, variance_exploding, nnc, diff_stop)
+#     #ens_r_vanilla[i,:] = evolve_r([variance_exploding(1)*randn()], n_diffs, g, variance_exploding, nnv, n_diffs)
+# end
+# ##
+
+# function get_closest_trajectories_indices_and_mean(ens_r::Array{Float64,2}, n::Int, target_value::Float64)
+#     differences = abs.(ens_r[:, end] .- target_value)
+#     closest_positions_indices = sortperm(differences)[1:n]
+#     closest_trajectories = ens_r[closest_positions_indices, :]
+#     mean_trajectory = mean(closest_trajectories, dims=1)
+#     return closest_positions_indices, mean_trajectory
+# end
+
+# target_value = 0.
+# n = 100
+# forward = evolve_f([target_value], n_diffs, g, diff_stop)
+# cpi, mt = get_closest_trajectories_indices_and_mean(ens_r, n, target_value)
+# #cpi_vanilla, mt_vanilla = get_closest_trajectories_indices_and_mean(ens_r_vanilla, n, target_value)
+
+# t_f = [i/n_diffs for i in 1:diff_stop]
+# t_r = [(diff_stop +1 - i)/n_diffs for i in 1:diff_stop]
+
+# plt = plot(xlims=(0,0.8), ylims=(-1.5,1.5))
+# for i in cpi
+#     plot!(plt, t_r, ens_r[i,:], color=:red, alpha=0.1, legend=false)
+# #    plot!(plt, t_r, ens_r_vanilla[i,:], color=:green, alpha=0.1, legend=false)
+# end
+# plot!(plt, t_r, mt[1,:], color=:red, alpha=1.0, legend=false)
+# #plot!(plt, t_r, mt_vanilla[1,:], color=:green, alpha=1.0, legend=false)
+# plot!(plt, t_f, forward[1,:], color=:blue, legend=false)
+# display(plt)
+# ##
+# target_value = 0.6
+# diff_stop = 200
+# reverse = evolve_r([target_value], n_diffs, g, variance_exploding, nnc, diff_stop)
+# reverse_vanilla = evolve_r([target_value], n_diffs, g, variance_exploding, nnv, diff_stop)
+# forward = evolve_f([target_value], n_diffs, g, diff_stop)
+
+# plot(t_r[n_diffs-diff_stop+1:end], reverse[1,:], color=:red, label="Reverse",ylims=(-0.5,1.5))
+# plot!(t_r[n_diffs-diff_stop+1:end], reverse_vanilla[1,:], color=:green, label="Reverse Vanilla")
+# plot!(t_f[1:diff_stop], forward[1,:], color=:blue, label="Forward")
+
