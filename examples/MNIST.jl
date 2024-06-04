@@ -81,7 +81,7 @@ Plots.plot(loss_clustered)
 
 nn_vanilla, loss_vanilla = train_vanilla(obs, 100, 128, [Dim+1, 128, 64, Dim], variance_exploding; activation=tanh)
 nnv(x, t) = nn_vanilla(Flux.Float32.([x..., t]))[:]
-cluster_loss = check_loss2(obs, nnc, variance_exploding)
+cluster_loss = check_loss(obs, nnc, variance_exploding)
 Plots.plot(loss_vanilla)
 Plots.hline!([cluster_loss])
 ##
@@ -89,11 +89,11 @@ Plots.hline!([cluster_loss])
 
 n_diffs_sampling = 100
 
-ens_clustered = sample2(Dim, nnc, 100, n_diffs_sampling, variance_exploding, g)
-ens_vanilla = sample2(Dim, nnv, 100, n_diffs_sampling, variance_exploding, g)
+ens_clustered = sample(Dim, nnc, 100, n_diffs_sampling, variance_exploding, g)
+ens_vanilla = sample(Dim, nnv, 100, n_diffs_sampling, variance_exploding, g)
 
 ens_clustered_decoded = decoder(ens_clustered .* 2 .- 1)
-ens_vanilla_decoded = decoder(ens_clustered .* 2 .- 1)
+ens_vanilla_decoded = decoder(ens_vanilla .* 2 .- 1)
 ##
 test_sample1 = ens_clustered_decoded[:, rand(1:100,16)]
 test_sample2 = ens_vanilla_decoded[:, rand(1:100,16)]
