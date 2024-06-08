@@ -7,6 +7,7 @@ using Flux, Random, KernelDensity
 using Plots, LinearAlgebra
 using Statistics
 using ProgressBars, QuadGK, ParallelKMeans,Distances, Interpolations
+using StateSpacePartitions
 
 function play_beep()
     run(`say "Code execution finished"`)
