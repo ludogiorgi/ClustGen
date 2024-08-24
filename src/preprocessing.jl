@@ -1,4 +1,4 @@
-function generate_xz(y, sigma)
+ function generate_xz(y, sigma)
     z = randn!(similar(y))
     x = @. y + sigma * z
     return x, z
