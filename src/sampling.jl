@@ -17,21 +17,22 @@ function sample_reverse(Dim, nn, n_samples, n_diffs, σ, g)
 end
 
 # Sampling with Langevin sampling method
-function sample_langevin(T, dt, f, x0; seed=123, res=1, boundary=false)
+function sample_langevin(T, dt, f, obs; seed=123, res=1, boundary=false)
     Random.seed!(seed)
     N = Int(T / dt)
-    dim = length(x0)
+    dim = length(obs[:,1])
     num_saved_steps = ceil(Int, N / res)
     x = zeros(dim, num_saved_steps)
     idx = 1
+    x0 = obs[:,rand(1:length(obs[1,:]))]
     x_temp = x0
     count = 0
     for t in ProgressBar(2:N)
         rk4_step!(x_temp, dt, f)  
         x_temp += √2 * randn(dim) * sqrt(dt) 
-        if boundary ==true
-            if any(x_temp .< -2) || any(x_temp .> 3)
-                x_temp = rand(dim)
+        if boundary != false
+            if any(x_temp .< boundary[1]) || any(x_temp .> boundary[2])
+                x_temp = obs[:,rand(1:length(obs[1,:]))]
                 count += 1
             end
         end

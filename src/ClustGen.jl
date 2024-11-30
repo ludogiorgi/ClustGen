@@ -22,6 +22,7 @@ include("sampling.jl")
 include("noising_schedules.jl")
 include("visualization.jl")
 include("generate.jl")
+include("utils.jl")
 
 function rk4_step!(u, dt, f)
     k1 = f(u)
@@ -37,6 +38,7 @@ export train, check_loss
 export sample_reverse, sample_langevin
 export σ_variance_exploding, g_variance_exploding
 export vectorfield2d, meshgrid
-export potential_data, ∇U_1D, ∇U_2D
+export potential_data, ∇U_1D, ∇U_2D, simulate_lorenz96
+export decorrelation_times
 
 end

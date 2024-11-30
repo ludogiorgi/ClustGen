@@ -50,6 +50,33 @@ function potential_data(x0, timesteps, dt, res; ϵ=√2)
     @info "done saving data for potential well"
 end
 
+function lorenz96(u, F)
+    n = length(u)
+    du = similar(u)
+    for i in 1:n
+        du[i] = (u[mod1(i+1, n)] - u[mod1(i-2, n)]) * u[mod1(i-1, n)] - u[i] + F
+    end
+    return du
+end
+
+function simulate_lorenz96(n_steps, dt, F, u0, σ; seed=123, res=1)
+    Random.seed!(seed)
+    dim = length(u0)
+    u = []
+    push!(u, u0)
+    uOld = u0
+    for t in 2:n_steps
+        du = lorenz96(uOld, F) * dt
+        noise = σ * randn(dim) * sqrt(2dt)
+        uNew = uOld .+ du .+ noise
+        if t % res == 0
+            push!(u, uNew)
+        end
+        uOld = uNew
+    end
+    return hcat(u...)
+end
+
 
 
 
