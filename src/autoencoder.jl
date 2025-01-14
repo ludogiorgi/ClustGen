@@ -33,7 +33,7 @@ function train_autoencoder!(autoencoder, train_loader, optimizer, epochs)
     end
 end
 
-function apply_autoencoder(data, neurons, epochs, batch_size; activation = tanh, output_activation = sigmoid, optimizer = Flux.ADAM(0.001), file_name = false)
+function apply_autoencoder(data, neurons, epochs, batch_size; activation = tanh, output_activation = sigmoid, optimizer = Adam(0.001), file_name = false)
     encoder = create_encoder(neurons; activation=activation)
     decoder = create_decoder(reverse(neurons); activation=activation, output_activation=output_activation)
     autoencoder = Flux.Chain(encoder, decoder)

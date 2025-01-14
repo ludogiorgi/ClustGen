@@ -1,3 +1,7 @@
+using Pkg
+Pkg.activate(".")
+Pkg.instantiate()
+##
 using Revise
 using ClustGen
 using KernelDensity
@@ -23,7 +27,7 @@ res = read(hfile["res"])
 close(hfile)
 
 ##
-############################ CLUSTERING ####################
+############################ CLUSTERING ############################
 
 function generate_xz(y, σ)
     z = randn!(similar(y))
@@ -67,4 +71,4 @@ for i in 1:4
 end
 plt
 
-savefig(plt, pwd() * "/figures/1D_pot_fig.png")
+# savefig(plt, pwd() * "/figures/1D_pot_fig.png")

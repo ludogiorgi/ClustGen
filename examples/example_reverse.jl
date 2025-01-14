@@ -1,4 +1,7 @@
-
+using Pkg
+Pkg.activate(".")
+Pkg.instantiate()
+##
 using Revise
 using ClustGen
 using MLDatasets, Flux, BSON, HDF5, ProgressBars, Plots, Random, LinearAlgebra, Statistics, KernelDensity

@@ -201,4 +201,8 @@ end
 
 # Create individual figures first
 f = plot_correlations_pub(corr_Qc_11, corr_Qc_12, corr_Qc_21, corr_Qc_22, corr_gen)
+
+kde_obs = kde(obs')
+kde_clustered = kde(trj_clustered')
+
 f2 = plot_pdfs_and_vectorfields_pub(kde_obs, kde_clustered, ∇U)

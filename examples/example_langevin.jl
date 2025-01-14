@@ -1,3 +1,7 @@
+using Pkg
+Pkg.activate(".")
+Pkg.instantiate()
+##
 using Revise
 using ClustGen
 using KernelDensity
@@ -61,7 +65,7 @@ Plots.plot(loss_clustered)
 ##
 #################### TRAINING WITH VANILLA LOSS ####################
 
-@time nn_vanilla, loss_vanilla = train(obs, 200, 128, [dim, 128, 64, dim], σ_value; use_gpu=true, opt=Adam(0.001))
+@time nn_vanilla, loss_vanilla = train(obs, 20, 128, [dim, 128, 64, dim], σ_value; use_gpu=true, opt=Adam(0.001))
 nn_vanilla_cpu = nn_vanilla |> cpu
 score_vanilla(x) = .- nn_vanilla_cpu(Float32.([x...])) ./ σ_value
 Plots.plot(loss_vanilla)
@@ -119,9 +123,9 @@ BSON.load(pwd() * "/NNs/nn_vanilla_D$(dim)_$(normalization)_$(σ_value).bson")[:
 plt1 = vectorfield2d(vf_c, grid, xlabel="X", ylabel="Y", title="Learned Force Field")
 plt2 = heatmap(kde_clustered.x, kde_clustered.y, kde_clustered.density, xlabel="X", ylabel="Y", title="Learned PDF", clims=(0, 0.5), colormap=:viridis)
 plt3 = vectorfield2d(vf, grid, xlabel="X", ylabel="Y", title="Observed Force Field")
-plt4 = heatmap(kde_obs.x, kde_obs.y, kde_obs.density, xlabel="X", ylabel="Y", title="Observed PDF", clims=(0, 0.5), colormap=:viridis)
+plt4 = heatmap(ekde_obs.x, kde_obs.y, kde_obs.density, xlabel="X", ylabel="Y", title="Observed PDF", clims=(0, 0.5), colormap=:viridis)
 plot(plt1, plt2, plt3, plt4, layout=(2, 2), size=(800, 800))
-savefig(pwd() * "/figures/2D_pot_fig2.png")
+#savefig(pwd() * "/figures/2D_pot_fig2.png")
 
 ##
 scatter(inputs[1,:], inputs[2,:], marker_z=targets_norm, label="", xlabel="X", ylabel="Y", title="Vector Field Norm", size=(600, 600), colormap=:viridis, markersize=7)
