@@ -108,7 +108,7 @@ function f_tilde_σ(σ::Float64, μ; prob = 0.001, do_print=false, conv_param=1e
         averages_old, centers_old = averages_new, centers_new
         i += 1
     end
-    return averages, centers, Nc
+    return averages, centers, Nc, labels
 end
 
 # Application of the function "f_tilde_σ" for a vector of σ values
@@ -117,7 +117,7 @@ function f_tilde(σ_values::Vector{Float64}, diff_times::Vector{Float64}, μ; pr
     centers_values = []
     Nc_values = []
     for i in eachindex(σ_values)
-        averages, centers, Nc = f_tilde_σ(σ_values[i], μ; prob=prob, do_print=do_print, conv_param=conv_param, i_max=i_max)
+        averages, centers, Nc, labels = f_tilde_σ(σ_values[i], μ; prob=prob, do_print=do_print, conv_param=conv_param, i_max=i_max)
         push!(averages_values, averages)
         push!(centers_values, centers)
         push!(Nc_values, Nc)
@@ -127,8 +127,29 @@ end
 
 # Application of the function "f_tilde_σ" for a single value of σ
 function f_tilde(σ_value::Float64, μ; prob = 0.001, do_print=false, conv_param=1e-1, i_max = 150, normalization=true)
-    averages, centers, Nc = f_tilde_σ(σ_value, μ; prob=prob, do_print=do_print, conv_param=conv_param, i_max=i_max)
+    averages, centers, Nc, labels = f_tilde_σ(σ_value, μ; prob=prob, do_print=do_print, conv_param=conv_param, i_max=i_max)
     return generate_inputs_targets(averages, centers, Nc; normalization=normalization)
 end
 
+# # Application of the function "f_tilde_σ" for a vector of σ values
+# function f_tilde_labels(σ_values::Vector{Float64}, diff_times::Vector{Float64}, μ; prob = 0.001, do_print=false, conv_param=1e-1, i_max = 150, normalization=true)
+#     averages_values = []
+#     centers_values = []
+#     Nc_values = []
+#     labels_values = []
+#     for i in eachindex(σ_values)
+#         averages, centers, Nc, labels = f_tilde_σ(σ_values[i], μ; prob=prob, do_print=do_print, conv_param=conv_param, i_max=i_max)
+#         push!(averages_values, averages)
+#         push!(centers_values, centers)
+#         push!(Nc_values, Nc)
+#         push!(labels_values, labels)
+#     end
+#     return generate_inputs_targets(diff_times, averages_values, centers_values, Nc_values; normalization=normalization), labels_values
+# end
+
+# Application of the function "f_tilde_σ" for a single value of σ
+function f_tilde_labels(σ_value::Float64, μ; prob = 0.001, do_print=false, conv_param=1e-1, i_max = 150, normalization=true)
+    averages, centers, Nc, labels = f_tilde_σ(σ_value, μ; prob=prob, do_print=do_print, conv_param=conv_param, i_max=i_max)
+    return averages, centers, Nc, labels
+end
 

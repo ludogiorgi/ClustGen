@@ -24,21 +24,13 @@ include("visualization.jl")
 include("generate.jl")
 include("utils.jl")
 
-function rk4_step!(u, dt, f)
-    k1 = f(u)
-    k2 = f(u .+ 0.5 .* dt .* k1)
-    k3 = f(u .+ 0.5 .* dt .* k2)
-    k4 = f(u .+ dt .* k3)
-    @inbounds u .= u .+ (dt / 6.0) .* (k1 .+ 2.0 .* k2 .+ 2.0 .* k3 .+ k4)
-end
-
 export apply_autoencoder, read_autoencoder
-export f_tilde
+export f_tilde, f_tilde_labels, generate_inputs_targets
 export train, check_loss
-export sample_reverse, sample_langevin
+export sample_reverse, sample_langevin, sample_langevin_Σ
 export σ_variance_exploding, g_variance_exploding
 export vectorfield2d, meshgrid
 export potential_data, ∇U_1D, ∇U_2D, simulate_lorenz96
-export decorrelation_times
+export decorrelation_times, rk4_step!, computeSigma, compute_corr
 
 end
