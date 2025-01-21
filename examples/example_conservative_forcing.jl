@@ -15,13 +15,14 @@ using Flux
 using QuadGK
 using BSON
 using GLMakie
+using GLMakie: xlims!, ylims!
 using StatsBase
 using MarkovChainHammer
 import MarkovChainHammer.Trajectory: ContinuousTimeEmpiricalProcess
 import LaTeXStrings
 
-##
-function ∇U(x; A1=1.0, A2=1.0, B1=0.6, B2=0.3, C=1.0, D=1.0)
+
+function ∇U(x; A1=1.0, A2=1.0, B1=0.6, B2=0.3, C=1.0, D=0.0)
     # Conservative gradient terms
     ∇U1 = 2 * (x[1] + A1) * (x[1] - A1)^2 + 2 * (x[1] - A1) * (x[1] + A1)^2 + B1 + C * (x[1] * x[2])^2
     ∇U2 = 2 * (x[2] + A2) * (x[2] - A2)^2 + 2 * (x[2] - A2) * (x[2] + A2)^2 + B2 + C * (x[1] * x[2])^2
@@ -84,58 +85,20 @@ gradLogp = zeros(dim, Nc)
 for i in 1:Nc
     gradLogp[:,i] = - averages[:,i] / σ_value
 end
+
 Σ_test = computeSigma(centers', P_steady, Q_c, gradLogp')
 
-trj_clustered = sample_langevin_Σ(100000, dt, score_clustered, randn(2), Σ_true; seed=123, res = 1)
+trj_clustered = sample_langevin_Σ(100000, dt, score_clustered, randn(dim), sqrt(Σ_test); seed=123, res = 1)
 
-dec_times_M = 400
-_, corr_gen = ClustGen.decorrelation_times(trj_clustered[:,1:100000], dec_times_M)
+res = 10
+tsteps = 81
 
-corr_Qc_11 = [compute_corr(centers[1,:], centers[1,:], P_steady, Q_c, dt*i) for i in 0:dec_times_M-1]
-corr_Qc_12 = [compute_corr(centers[1,:], centers[2,:], P_steady, Q_c, dt*i) for i in 0:dec_times_M-1]
-corr_Qc_21 = [compute_corr(centers[2,:], centers[1,:], P_steady, Q_c, dt*i) for i in 0:dec_times_M-1]
-corr_Qc_22 = [compute_corr(centers[2,:], centers[2,:], P_steady, Q_c, dt*i) for i in 0:dec_times_M-1]
+auto_Q = zeros(dim, tsteps)
+auto_gen = zeros(dim, tsteps)
 
-##
-
-# Example function to style correlation plots
-function plot_correlations_pub(corr_Qc_11, corr_Qc_12, corr_Qc_21, corr_Qc_22, corr_gen; resolution=(1200, 800))
-    set_theme!(Theme(fontsize=18, backgroundcolor=:white, colormap=:viridis))
-    f = Figure(resolution=resolution)
-    len_corr = length(corr_Qc_11)
-    
-    # Get colors from viridis palette
-    color1 = cgrad(:viridis)[0.6]  # First color
-    color2 = cgrad(:viridis)[0.2]  # Second color
-    
-    # C₁₁
-    ax1 = Axis(f[1, 1], xlabel="Time", ylabel="Correlation",
-               title=L"\textbf{C_{11}}", xticksize=10, yticksize=10, titlesize=20)
-    lines!(ax1, dt:dt:dt*len_corr, corr_Qc_11, label="From Data", linewidth=2, color=color1)
-    lines!(ax1, dt:dt:dt*len_corr, corr_gen[1, 1, :], label="From Score", linewidth=2, color=color2)
-    axislegend(ax1, position=:rt, framevisible=false)
-
-    # C₁₂
-    ax2 = Axis(f[1, 2], xlabel="Time", ylabel="Correlation",
-               title=L"\textbf{C_{12}}", xticksize=10, yticksize=10, titlesize=20)
-    lines!(ax2, dt:dt:dt*len_corr, corr_Qc_12, label="From Data", linewidth=2, color=color1)
-    lines!(ax2, dt:dt:dt*len_corr, corr_gen[1, 2, :], label="From Score", linewidth=2, color=color2)
-
-    # C₂₁
-    ax3 = Axis(f[2, 1], xlabel="Time", ylabel="Correlation",
-               title=L"\textbf{C_{21}}", xticksize=10, yticksize=10, titlesize=20)
-    lines!(ax3, dt:dt:dt*len_corr, corr_Qc_21, label="From Data", linewidth=2, color=color1)
-    lines!(ax3, dt:dt:dt*len_corr, corr_gen[2, 1, :], label="From Score", linewidth=2, color=color2)
-
-    # C₂₂
-    ax4 = Axis(f[2, 2], xlabel="Time", ylabel="Correlation",
-               title=L"\textbf{C_{22}}", xticksize=10, yticksize=10, titlesize=20)
-    lines!(ax4, dt:dt:dt*len_corr, corr_Qc_22, label="From Data", linewidth=2, color=color1)
-    lines!(ax4, dt:dt:dt*len_corr, corr_gen[2, 2, :], label="From Score", linewidth=2, color=color2)
-
-    display(f)
-    save("figures/fig1_pub.png", f, resolution=resolution)
-    return f
+for i in 1:dim
+    auto_Q[i,:] = autocovariance(centers[i,:], Q_c, [0:dt*res:Int(res * (tsteps-1) * dt)...]) ./ std(centers[i,:])^2
+    auto_gen[i,:] = autocovariance(trj_clustered[i,1:res:end]; timesteps=tsteps) ./ std(trj_clustered[i,:])^2
 end
 
 function plot_vector_field!(ax, f; range_x=(-2, 2), range_y=(-2, 2), N=20)
@@ -165,44 +128,57 @@ function plot_vector_field!(ax, f; range_x=(-2, 2), range_y=(-2, 2), N=20)
            colormap=:viridis)
 end
 
+resolution=(1000, 1000)
+set_theme!(Theme(fontsize=18, backgroundcolor=:white, colormap=:viridis))
+f = Figure(resolution=resolution)
+len_corr = length(auto_Q[1,:])
 
-function plot_pdfs_and_vectorfields_pub(kde_obs, kde_clustered, vecfun; resolution=(1200, 800))
-    set_theme!(Theme(fontsize=18, backgroundcolor=:white, colormap=:viridis))
-    f2 = Figure(resolution=resolution)
+kde_obs_12 = kde(obs[[1,2],:]')
+kde_clustered_12 = kde(trj_clustered[[1,2],:]') 
+    
+# Get colors from viridis palette
+color1 = cgrad(:viridis)[0.6]  # First color
+color2 = cgrad(:viridis)[0.2]  # Second color
+    
 
-    # PDF from Data
-    ax1 = Axis(f2[1, 1], title="PDF from Data", xlabel="x", ylabel="y")
-    hm1 = heatmap!(ax1, kde_obs.x, kde_obs.y, kde_obs.density, 
-                   colorrange=(0, maximum(kde_obs.density)))
+ax1 = Axis(f[1, 1], xlabel="Time", ylabel="Correlation",
+            title=L"\textbf{C_{11}}", xticksize=10, yticksize=10, titlesize=20)
+lines!(ax1, 0:res*dt:res*dt*(len_corr-1), auto_Q[1,:], label="From Data", linewidth=2, color=color1)
+lines!(ax1, 0:res*dt:res*dt*(len_corr-1), auto_gen[1,:], label="From Score", linewidth=2, color=color2)
+axislegend(ax1, position=:rt, framevisible=false)
 
-    # PDF from Score
-    ax2 = Axis(f2[2, 1], title="PDF from Score", xlabel="x", ylabel="y")
-    hm2 = heatmap!(ax2, kde_clustered.x, kde_clustered.y, kde_clustered.density, 
-                   colorrange=(0, maximum(kde_clustered.density)))
+ax2 = Axis(f[1, 2], xlabel="Time", ylabel="Correlation",
+            title=L"\textbf{C_{22}}", xticksize=10, yticksize=10, titlesize=20)
+lines!(ax2, 0:res*dt:res*dt*(len_corr-1), auto_Q[2,:], label="From Data", linewidth=2, color=color1)
+lines!(ax2, 0:res*dt:res*dt*(len_corr-1), auto_gen[2,:], label="From Score", linewidth=2, color=color2)
 
-    # Add colorbar for PDFs
-    Colorbar(f2[1:2, 2], hm1, label="Probability density")
+# PDF from Data
+ax3 = Axis(f[2, 1], title="PDF from Data", xlabel="x₁", ylabel="x₂")
+xlims!(ax3, -2, 2)
+ylims!(ax3, -2, 2)
 
-    # True Vector Field
-    ax3 = Axis(f2[1, 3], title="True Vector Field", xlabel="x", ylabel="y")
-    vf1 = plot_vector_field!(ax3, vecfun)
+# Then call heatmap! without xlims/ylims:
+hm1 = GLMakie.heatmap!(
+    ax3,
+    kde_obs_12.x,
+    kde_obs_12.y,
+    kde_obs_12.density,
+    colorrange=(0, maximum(kde_clustered_12.density))
+)
 
-    # Vector Field from Score
-    ax4 = Axis(f2[2, 3], title="Vector Field from Score", xlabel="x", ylabel="y")
-    vf2 = plot_vector_field!(ax4, vecfun)
+# PDF from Score
+ax4 = Axis(f[2, 2], title="PDF from Score", xlabel="x₁", ylabel="x₂")
+xlims!(ax4, -2, 2)
+ylims!(ax4, -2, 2)
+hm2 = GLMakie.heatmap!(ax4, kde_clustered_12.x, kde_clustered_12.y, kde_clustered_12.density, 
+                   colorrange=(0, maximum(kde_clustered_12.density)))
 
-    # Add colorbar for vector fields
-    Colorbar(f2[1:2, 4], vf1, label="Vector magnitude")
+        
+# Add colorbar for PDFs
+Colorbar(f[2, 3], hm1, label="Probability density")
 
-    display(f2)
-    save("figures/fig2_pub.png", f2, resolution=resolution)
-    return f2
-end
+# save("figures/fig_pub_potential.png", f, resolution=resolution)
+                                     
+f
 
-# Create individual figures first
-f = plot_correlations_pub(corr_Qc_11, corr_Qc_12, corr_Qc_21, corr_Qc_22, corr_gen)
 
-kde_obs = kde(obs')
-kde_clustered = kde(trj_clustered')
-
-f2 = plot_pdfs_and_vectorfields_pub(kde_obs, kde_clustered, ∇U)

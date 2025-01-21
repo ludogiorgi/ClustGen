@@ -1,40 +1,3 @@
-
-function decorrelation_times(time_series::Array{Float64, 2}, threshold)
-    D, N = size(time_series)
-    
-    if threshold isa Integer
-        # If threshold is an integer, compute correlation only for the first 'threshold' time steps
-        autocorr_times = fill(threshold, D, D)
-        max_t = min(threshold, N)  # Safeguard in case threshold > N
-        corr_series = zeros(D, D, max_t)
-        for d1 in 1:D, d2 in 1:D
-            for t in 1:max_t
-                corr_series[d1, d2, t] = cor(time_series[d1, 1:end-t+1], time_series[d2, t:end])
-            end
-        end
-        return autocorr_times, corr_series
-    else
-        # If threshold is a float, run the original logic
-        autocorr_times = zeros(Int, D, D)
-        for d1 in 1:D, d2 in 1:D
-            for t in 2:N
-                autocorr = cor(time_series[d1, 1:end-t+1], time_series[d2, t:end])
-                if autocorr < threshold
-                    autocorr_times[d1, d2] = t
-                    break
-                end
-            end
-        end
-        corr_series = zeros(D, D, maximum(autocorr_times))
-        for d1 in 1:D, d2 in 1:D
-            for t in 1:autocorr_times[d1, d2]
-                corr_series[d1, d2, t] = cor(time_series[d1, 1:end-t+1], time_series[d2, t:end])
-            end
-        end
-        return autocorr_times, corr_series
-    end
-end
-
 function rk4_step!(u, dt, f)
     k1 = f(u)
     k2 = f(u .+ 0.5 .* dt .* k1)
@@ -43,17 +6,6 @@ function rk4_step!(u, dt, f)
     @inbounds u .= u .+ (dt / 6.0) .* (k1 .+ 2.0 .* k2 .+ 2.0 .* k3 .+ k4)
 end
 
-"""
-    computeSigma(X, piVec, Q, gradLogp)
-
-Compute the matrix Sigma (D×D) based on:
-  - X:       an N×D matrix of data (row n is x^n in R^D).
-  - piVec:   an N-element vector (π^n).
-  - Q:       an N×N matrix.
-  - gradLogp: an N×D matrix of gradients 
-              (row n corresponds to ∇ ln p_S(x^n) in R^D).
-Returns Sigma (D×D).
-"""
 function computeSigma(X,
                       piVec,
                       Q,
@@ -102,33 +54,34 @@ function computeSigma(X,
     return Sigma
 end
 
-function compute_corr(x_i, x_j, π, Q, τ)
-    """
-    Computes the expression:
-    sum_{n=1}^N x_j^n π^n [sum_{m=1}^N x_i^m [exp(Q * τ)]_{mn}]
-    
-    Arguments:
-    x_i  -- Array of size N, values for x_i^m
-    x_j  -- Array of size N, values for x_j^n
-    π    -- Array of size N, stationary distribution π^n
-    Q    -- NxN matrix, the generator matrix Q
-    τ    -- Scalar, the time lag τ
-    
-    Returns:
-    result -- Scalar value of the computed expression
-    """
-    # Compute the matrix exponential exp(Q * τ)
-    exp_Qτ = exp(Q * τ)
-    
-    # Center the input vectors
-    x_i = x_i[:] .- mean(x_i)
-    x_j = x_j[:] .- mean(x_j)
-    
-    # Compute the inner sum using matrix-vector multiplication
-    inner_sum = exp_Qτ' * x_i
-    
-    # Compute the final result using element-wise multiplication and summation
-    result = sum(x_j .* π .* inner_sum)
-    
-    return result / std(x_j) / std(x_i)
+
+function covariance(x1, x2; timesteps=length(x), progress = false)
+    μ1 = mean(x1)
+    μ2 = mean(x2)
+    autocor = zeros(timesteps)
+    progress ? iter = ProgressBar(1:timesteps) : iter = 1:timesteps
+    for i in iter
+        autocor[i] = mean(x1[i:end] .* x2[1:end-i+1]) - μ1 * μ2
+    end
+    return autocor
 end
+
+
+function covariance(g⃗1, g⃗2, Q::Eigen, timelist; progress=false)
+   #  @assert all(real.(Q.values[1:end-1]) .< 0) "Did not pass an ergodic generator matrix"
+    autocov = zeros(length(timelist))
+    # Q  = V Λ V⁻¹
+    Λ, V = Q
+    p = real.(V[:, end] ./ sum(V[:, end]))
+    v1 = V \ (p .* g⃗1)
+    w2 = g⃗2' * V
+    μ1 = sum(p .* g⃗1)
+    μ2 = sum(p .* g⃗2)
+    progress ? iter = ProgressBar(eachindex(timelist)) : iter = eachindex(timelist)
+    for i in iter
+        autocov[i] = real(w2 * (exp.(Λ .* timelist[i]) .* v1) - μ1 * μ2)
+    end
+    return autocov
+end
+
+covariance(g⃗1, g⃗2, Q, timelist; progress = false) = covariance(g⃗1, g⃗2, eigen(Q), timelist; progress = progress)

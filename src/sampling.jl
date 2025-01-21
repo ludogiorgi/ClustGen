@@ -59,7 +59,7 @@ function sample_langevin_Σ(T, dt, f, obs, Σ; seed=123, res=1, boundary=false)
     for t in ProgressBar(2:N)
         f_Σ2(x) = Σ^2 * f(x)
         rk4_step!(x_temp, dt, f_Σ2)  
-        x_temp += Σ * randn(dim) * sqrt(2*dt) 
+        x_temp += Σ * randn(dim) * sqrt(2dt) 
         if boundary != false
             if any(x_temp .< boundary[1]) || any(x_temp .> boundary[2])
                 x_temp = obs[:,rand(1:length(obs[1,:]))]

@@ -31,6 +31,6 @@ export sample_reverse, sample_langevin, sample_langevin_Σ
 export σ_variance_exploding, g_variance_exploding
 export vectorfield2d, meshgrid
 export potential_data, ∇U_1D, ∇U_2D, simulate_lorenz96
-export decorrelation_times, rk4_step!, computeSigma, compute_corr
+export covariance, rk4_step!, computeSigma
 
 end

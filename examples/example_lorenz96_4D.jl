@@ -16,7 +16,7 @@ obs = (u_lorenz96 .- mean(u_lorenz96, dims=2)) ./ std(u_lorenz96, dims=2)
 scatter(obs[1,1:10000], obs[2,1:10000], obs[3,1:10000], markersize=1)
 ##
 ############################ CLUSTERING ####################
-obs
+
 normalization = false
 σ_value = 0.05
 
@@ -74,15 +74,15 @@ kde_obs_xy = kde(obs[1:2,:]')
 kde_obs_xw = kde(obs[[1,3],:]')
 kde_obs_xz = kde(obs[[1,4],:]')
 
-plt1 = heatmap(kde_clustered_xy.x, kde_clustered_xy.y, kde_clustered_xy.density, xlabel="X", ylabel="Y", title="Sampled PDF XY")
-plt2 = heatmap(kde_clustered_xw.x, kde_clustered_xw.y, kde_clustered_xw.density, xlabel="X", ylabel="W", title="Sampled PDF XW")
-plt3 = heatmap(kde_clustered_xz.x, kde_clustered_xz.y, kde_clustered_xz.density, xlabel="X", ylabel="Z", title="Sampled PDF XZ")
+plt1 = Plots.heatmap(kde_clustered_xy.x, kde_clustered_xy.y, kde_clustered_xy.density, xlabel="X", ylabel="Y", title="Sampled PDF XY")
+plt2 = Plots.heatmap(kde_clustered_xw.x, kde_clustered_xw.y, kde_clustered_xw.density, xlabel="X", ylabel="W", title="Sampled PDF XW")
+plt3 = Plots.heatmap(kde_clustered_xz.x, kde_clustered_xz.y, kde_clustered_xz.density, xlabel="X", ylabel="Z", title="Sampled PDF XZ")
 
-plt4 = heatmap(kde_obs_xy.x, kde_obs_xy.y, kde_obs_xy.density, xlabel="X", ylabel="Y", title="Observed PDF XY")
-plt5 = heatmap(kde_obs_xw.x, kde_obs_xw.y, kde_obs_xw.density, xlabel="X", ylabel="W", title="Observed PDF XW")
-plt6 = heatmap(kde_obs_xz.x, kde_obs_xz.y, kde_obs_xz.density, xlabel="X", ylabel="Z", title="Observed PDF XZ")
+plt4 = Plots.heatmap(kde_obs_xy.x, kde_obs_xy.y, kde_obs_xy.density, xlabel="X", ylabel="Y", title="Observed PDF XY")
+plt5 = Plots.heatmap(kde_obs_xw.x, kde_obs_xw.y, kde_obs_xw.density, xlabel="X", ylabel="W", title="Observed PDF XW")
+plt6 = Plots.heatmap(kde_obs_xz.x, kde_obs_xz.y, kde_obs_xz.density, xlabel="X", ylabel="Z", title="Observed PDF XZ")
 
-plot(plt1, plt2, plt3, plt4, plt5, plt6, layout=(2,3), size=(1200,600))
+Plots.plot(plt1, plt2, plt3, plt4, plt5, plt6, layout=(2,3), size=(1200,600))
 
 #savefig("figures/lorenz96_D$(dim)_sigma$(noise).png")
 
