@@ -32,12 +32,12 @@ function cleaning(averages, centers, labels)
 end
 
 ##
-T = 10000000.0
+T = 100000000.0
 dt = 0.01
 dim = 4
 F = 6.0
 u0 = randn(dim)
-noise = 0.1
+noise = 0.2
 
 u_lorenz96 = simulate_lorenz96(T, dt, F, u0, noise; res=1)
 obs = (u_lorenz96 .- mean(u_lorenz96, dims=2)) ./ std(u_lorenz96, dims=2)
@@ -95,17 +95,19 @@ for i in 1:dim
     auto_gen[i,:] = autocovariance(trj_clustered[i,1:res:end]; timesteps=tsteps) ./ std(trj_clustered[i,:])^2
 end
 
-resolution=(1000, 1500)
-set_theme!(Theme(fontsize=18, backgroundcolor=:white, colormap=:viridis))
-f = Figure(resolution=resolution)
-len_corr = length(auto_Q[1,:])
-
 kde_obs_12 = kde(obs[[1,2],:]')
 kde_clustered_12 = kde(trj_clustered[[1,2],:]') 
 kde_obs_13 = kde(obs[[1,3],:]')
 kde_clustered_13 = kde(trj_clustered[[1,3],:]')
 kde_obs_14 = kde(obs[[1,4],:]')
 kde_clustered_14 = kde(trj_clustered[[1,4],:]')
+
+##
+
+resolution=(1000, 1500)
+set_theme!(Theme(fontsize=18, backgroundcolor=:white, colormap=:viridis))
+f = Figure(resolution=resolution)
+len_corr = length(auto_Q[1,:])
 
     
 # Get colors from viridis palette
@@ -186,6 +188,86 @@ hm6 = GLMakie.heatmap!(ax10, kde_clustered_14.x, kde_clustered_14.y, kde_cluster
 # Add colorbar for PDFs
 Colorbar(f[3:5, 3], hm1, label="Probability density")
 
-# save("figures/fig_pub.png", f, resolution=resolution)
+# save("figures/fig_pub_lorenz96_4D.png", f, resolution=resolution)
                                      
 f
+
+##
+using GLMakie: Figure, Axis3, scatter!, display
+
+start = 1000
+finish = 10000
+
+fig = Figure(resolution=(1500, 500))
+
+ax1 = Axis3(fig[1, 1], title="Clustered")
+scatter!(
+    ax1,
+    trj_clustered[1, start:finish],
+    trj_clustered[2, start:finish],
+    trj_clustered[3, start:finish],
+    markersize=2,
+    label="Clustered"
+)
+
+# Adjust the viewing angle:
+ax1.azimuth[] = 20
+ax1.elevation[] = 10
+
+ax2 = Axis3(fig[1, 2], title="Data")
+scatter!(
+    ax2,
+    obs[1, start:finish],
+    obs[2, start:finish],
+    obs[3, start:finish],
+    markersize=2,
+    label="Data"
+)
+
+# Another example angle for ax2
+ax2.azimuth[] = 20
+ax2.elevation[] = 10
+
+ax3 = Axis(fig[1, 3], xlabel="Time",
+            title=L"Autocorrelation", xticksize=10, yticksize=10, titlesize=20)
+lines!(ax3, 0:res*dt:res*dt*(len_corr-1), mean(auto_Q, dims=1)[:], label="From Data", linewidth=2, color=color1)
+lines!(ax3, 0:res*dt:res*dt*(len_corr-1), mean(auto_gen, dims=1)[:], label="From Score", linewidth=2, color=color2)
+axislegend(ax3, position=:rt, framevisible=false)
+
+display(fig)
+
+##
+time_true = 5000
+trj_true = simulate_lorenz96(time_true, dt, F, u0, noise; res=1)
+trj_true = (trj_true .- mean(trj_true, dims=2)) ./ std(trj_true, dims=2)
+
+time_gen = 50
+Σ_test2 = 0.1 * Matrix(1.0I, dim, dim)
+trj_gen = sample_langevin_Σ(time_gen, 0.2*dt, score_clustered, trj_true[:,1], Σ_test; seed=123, res = 5)
+
+fig = Figure(resolution=(1500, 500))
+
+ax1 = Axis3(fig[1, 1], title="Clustered")
+lines!(
+    ax1,
+    trj_true[1, :],
+    trj_true[2, :],
+    trj_true[3, :],
+    linewidth=1,
+    label="Truth"
+)
+
+lines!(
+    ax1,
+    trj_gen[1, :],
+    trj_gen[2, :],
+    trj_gen[3, :],
+    linewidth=1,
+    label="Generated"
+)
+
+# Adjust the viewing angle:
+ax1.azimuth[] = 20
+ax1.elevation[] = 10
+
+fig

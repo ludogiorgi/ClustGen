@@ -76,9 +76,3 @@ function simulate_lorenz96(n_steps, dt, F, u0, σ; seed=123, res=1)
     end
     return hcat(u...)
 end
-
-
-
-
-    
-    

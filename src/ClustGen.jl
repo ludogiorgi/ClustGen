@@ -12,7 +12,7 @@ using QuadGK
 using BSON
 using CUDA
 using Plots
-using Zygote
+# using Zygote
 using StatsBase
 
 include("autoencoder.jl")

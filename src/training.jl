@@ -1,5 +1,3 @@
-
-
 # Generate training data for vanilla loss and reverse sampling method
 function generate_txz(y, σ; ϵ=0.05)
     t = rand!(similar(y, size(y)[1])) .* (1 - ϵ) .+ ϵ
@@ -65,7 +63,7 @@ function train(obs, n_epochs, batch_size, neurons::Vector{Int}, σ; opt=Adam(0.0
         for (batch_inputs, batch_targets) in data_loader
             batch_inputs = batch_inputs |> device
             batch_targets = batch_targets |> device
-            gs = gradient(() -> loss_score(nn, batch_inputs, batch_targets), Flux.params(nn))
+            gs = Flux.gradient(() -> loss_score(nn, batch_inputs, batch_targets), Flux.params(nn))
             for (param, grad) in zip(Flux.params(nn), gs)
                 Flux.Optimisers.update!(opt, param, grad)
             end
@@ -93,7 +91,7 @@ function train(obs, n_epochs, batch_size, nn::Chain, σ; opt=Adam(0.001), ϵ=0.0
         for (batch_inputs, batch_targets) in data_loader
             batch_inputs = batch_inputs |> device
             batch_targets = batch_targets |> device
-            gs = gradient(() -> loss_score(nn, batch_inputs, batch_targets), Flux.params(nn))
+            gs = Flux.gradient(() -> loss_score(nn, batch_inputs, batch_targets), Flux.params(nn))
             for (param, grad) in zip(Flux.params(nn), gs)
                 Flux.Optimisers.update!(opt, param, grad)
             end
@@ -117,7 +115,7 @@ function train(obs, n_epochs, batch_size, neurons; opt=Adam(0.001), activation=s
         for (batch_inputs, batch_targets) in data_loader
             batch_inputs = batch_inputs |> device
             batch_targets = batch_targets |> device
-            gs = gradient(() -> loss_score(nn, batch_inputs, batch_targets), Flux.params(nn))
+            gs = Flux.gradient(() -> loss_score(nn, batch_inputs, batch_targets), Flux.params(nn))
             for (param, grad) in zip(Flux.params(nn), gs)
                 Flux.Optimisers.update!(opt, param, grad)
             end
