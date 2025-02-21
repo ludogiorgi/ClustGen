@@ -1,78 +1,109 @@
-
-function U_1D(x; A1=1.0, B1=0.0)
-    return (x + A1)^2 * (x - A1)^2 + B1 * x
-end 
-
-function ∇U_1D(x; A1=1.0, B1=0.0)
-    ∇U = 2 * (x[1] + A1) * (x[1] - A1)^2 + 2 * (x[1] - A1) * (x[1] + A1)^2 + B1
-    return [∇U]
-
+function rk4_step!(u, dt, f, t)
+    k1 = f(u, t)
+    k2 = f(u .+ 0.5 .* dt .* k1, t + 0.5 * dt)
+    k3 = f(u .+ 0.5 .* dt .* k2, t + 0.5 * dt)
+    k4 = f(u .+ dt .* k3, t + dt)
+    @inbounds u .= u .+ (dt / 6.0) .* (k1 .+ 2.0 .* k2 .+ 2.0 .* k3 .+ k4)
 end
 
-function U_2D(x; A1=1.0, A2=1.2, B1=0.6, B2=0.3)
-    return (x[1] + A1)^2 * (x[1] - A1)^2 + (x[2] + A2)^2 * (x[2] - A2)^2 + B1 * x[1] + B2 * x[2]
+function euler_step!(u, dt, f, t)
+    k1 = f(u, t)
+    @inbounds u .= u .+ dt .* k1
 end
 
-function ∇U_2D(x; A1=1.0, A2=1.2, B1=0.6, B2=0.3)
-    ∇U1 = 2 * (x[1] + A1) * (x[1] - A1)^2 + 2 * (x[1] - A1) * (x[1] + A1)^2 + B1
-    ∇U2 = 2 * (x[2] + A2) * (x[2] - A2)^2 + 2 * (x[2] - A2) * (x[2] + A2)^2 + B2
-    return [∇U1, ∇U2]
+function add_noise!(u, dt, σ::Union{Real,Vector}, dim)
+    u .+= sqrt(2dt) .* σ .* randn(dim)
 end
 
-function potential_data(x0, timesteps, dt, res; ϵ=√2)
-    dim = length(x0)
-    if dim == 1
-        ∇U = ∇U_1D
-    elseif dim == 2
-        ∇U = ∇U_2D
-    else
-        error("Dimension not supported")
-    end
-    force(x) = -∇U(x)
-    x = []
-    x_temp = x0
-    for i in ProgressBar(2:timesteps)
-        rk4_step!(x_temp, dt, force)
-        @inbounds x_temp .+= ϵ * randn(dim) * sqrt(dt)
-        if i % res == 0
-            push!(x, copy(x_temp))
-        end
-    end
-    x = hcat(x...)
-    # x = (x .- minimum(x)) ./ (maximum(x) - minimum(x))
-    println("Autocorrelation: ", autocor(x')[2,:])
-    @info "saving data for potential well"
-    hfile = h5open(pwd() * "/data/potential_data_D$(dim).hdf5", "w")
-    hfile["x"] = x
-    hfile["dt"] = dt
-    hfile["res"] = res
-    close(hfile)
-    @info "done saving data for potential well"
+function add_noise!(u, dt, σ::Matrix, dim)
+    u .+= sqrt(2dt) .* (σ * randn(dim))
 end
 
-function lorenz96(u, F)
-    n = length(u)
-    du = similar(u)
-    for i in 1:n
-        du[i] = (u[mod1(i+1, n)] - u[mod1(i-2, n)]) * u[mod1(i-1, n)] - u[i] + F
-    end
-    return du
-end
-
-function simulate_lorenz96(n_steps, dt, F, u0, σ; seed=123, res=1)
-    Random.seed!(seed)
+function evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false)
     dim = length(u0)
-    u = []
-    push!(u, u0)
-    uOld = u0
-    for t in 2:n_steps
-        du = lorenz96(uOld, F) * dt
-        noise = σ * randn(dim) * sqrt(2dt)
-        uNew = uOld .+ du .+ noise
-        if t % res == 0
-            push!(u, uNew)
-        end
-        uOld = uNew
+    Nsave = ceil(Int, Nsteps / resolution)
+
+    u = copy(u0)
+    results = Matrix{Float64}(undef, dim, Nsave+1)  # Store results as (dim, Nsave)
+    results[:, 1] .= u0
+
+    Random.seed!(seed)
+
+    if timestepper == :rk4
+        timestepper = rk4_step!
+    elseif timestepper == :euler
+        timestepper = euler_step!
+    else
+        error("Invalid timestepper specified. Use :rk4 or :euler.")
     end
-    return hcat(u...)
+
+    t = 0.0
+    save_index = 1
+    if boundary == false
+        for step in 1:Nsteps
+            sig = sigma(u, t)
+            timestepper(u, dt, f, t)
+            add_noise!(u, dt, sig, dim)
+            t += dt
+            if step % resolution == 0
+                save_index += 1
+                results[:, save_index] .= u
+            end
+        end
+    else
+        count = 0
+        for step in 1:Nsteps
+            sig = sigma(u, t)
+            timestepper(u, dt, f, t)
+            add_noise!(u, dt, sig, dim)
+            t += dt
+            if any(u .< boundary[1]) || any(u .> boundary[2])
+                u .= u0
+                count += 1
+            end
+            if step % resolution == 0
+                save_index += 1
+                results[:, save_index] .= u
+            end
+        end
+        println("Percentiage of boundary crossings: ", count/Nsteps)
+    end
+    return results
 end
+
+function evolve(u0, dt, Nsteps, f, sigma1, sigma2; seed=123, resolution=1, timestepper=:rk4)
+    dim = length(u0)
+    Nsave = ceil(Int, Nsteps / resolution)
+
+    u = copy(u0)
+    results = Matrix{Float64}(undef, dim, Nsave+1)  # Store results as (dim, Nsave)
+    results[:, 1] .= u0
+
+    Random.seed!(seed)
+
+    if timestepper == :rk4
+        timestepper = rk4_step!
+    elseif timestepper == :euler
+        timestepper = euler_step!
+    else
+        error("Invalid timestepper specified. Use :rk4 or :euler.")
+    end
+
+    t = 0.0
+    save_index = 1
+    for step in 1:Nsteps
+        sig1 = sigma1(u, t)
+        sig2 = sigma2(u, t)
+        timestepper(u, dt, f, t)
+        add_noise!(u, dt, sig1, dim)
+        add_noise!(u, dt, sig2, dim)
+        t += dt
+        if (step-1) % resolution == 0
+            save_index += 1
+            results[:, save_index] .= u
+        end
+    end
+    return results
+end
+
+evolve(u0, dt, Nsteps, f; resolution=1) = evolve(u0, dt, Nsteps, f, 0.0; resolution=resolution)

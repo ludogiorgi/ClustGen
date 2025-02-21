@@ -47,7 +47,7 @@ function loss_score(nn, inputs, targets)
 end
 
 # Train the NN with vanilla loss
-function train(obs, n_epochs, batch_size, neurons::Vector{Int}, σ; opt=Adam(0.001), activation=swish, last_activation = identity, ϵ=0.05, use_gpu=true)
+function train(obs, n_epochs, batch_size, neurons::Vector{Int}, σ; opt=Flux.Adam(0.001), activation=swish, last_activation = identity, ϵ=0.05, use_gpu=true)
     device = (use_gpu && CUDA.functional()) ? gpu : cpu
     println("Using $(device === gpu ? "GPU" : "CPU")")
     nn = create_nn(neurons, activation=activation, last_activation=last_activation) |> device
@@ -75,7 +75,7 @@ function train(obs, n_epochs, batch_size, neurons::Vector{Int}, σ; opt=Adam(0.0
 end
 
 # Further training of the NN with vanilla loss
-function train(obs, n_epochs, batch_size, nn::Chain, σ; opt=Adam(0.001), ϵ=0.05, use_gpu=true)
+function train(obs, n_epochs, batch_size, nn::Chain, σ; opt=Flux.Adam(0.001), ϵ=0.05, use_gpu=true)
     device = (use_gpu && CUDA.functional()) ? gpu : cpu
     println("Using $(device === gpu ? "GPU" : "CPU")")
     nn |> device
@@ -103,23 +103,33 @@ function train(obs, n_epochs, batch_size, nn::Chain, σ; opt=Adam(0.001), ϵ=0.0
 end
 
 # Train the NN with clustering loss
-function train(obs, n_epochs, batch_size, neurons; opt=Adam(0.001), activation=swish, last_activation = identity, use_gpu=true)
+function train(obs, n_epochs, batch_size, neurons; opt=Flux.Adam(0.001), activation=swish, last_activation = identity, use_gpu=true)
     device = (use_gpu && CUDA.functional()) ? gpu : cpu
     println("Using $(device === gpu ? "GPU" : "CPU")")
     nn = create_nn(neurons, activation=activation, last_activation=last_activation) |> device
+    
+    # Set up optimizer state
+    opt_state = Flux.setup(opt, nn)
+    
     losses = []
     for epoch in ProgressBar(1:n_epochs) 
         inputs, targets = obs
         data_loader = Flux.DataLoader((inputs, targets), batchsize=batch_size, shuffle=true) 
         epoch_loss = 0.0
+        
         for (batch_inputs, batch_targets) in data_loader
             batch_inputs = batch_inputs |> device
             batch_targets = batch_targets |> device
-            gs = Flux.gradient(() -> loss_score(nn, batch_inputs, batch_targets), Flux.params(nn))
-            for (param, grad) in zip(Flux.params(nn), gs)
-                Flux.Optimisers.update!(opt, param, grad)
+            
+            # Compute gradients and loss
+            loss, grads = Flux.withgradient(nn) do m
+                loss_score(m, batch_inputs, batch_targets)
             end
-            epoch_loss += loss_score(nn, batch_inputs, batch_targets)
+            
+            # Update parameters
+            Flux.update!(opt_state, nn, grads[1])
+            
+            epoch_loss += loss
         end
         push!(losses, epoch_loss / length(data_loader))
     end

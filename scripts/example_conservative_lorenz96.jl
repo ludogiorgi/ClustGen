@@ -22,15 +22,6 @@ using MarkovChainHammer
 import MarkovChainHammer.Trajectory: ContinuousTimeEmpiricalProcess
 import LaTeXStrings
 
-function cleaning(averages, centers, labels)
-    unique_clusters = sort(unique(labels))
-    mapping = Dict(old_cluster => new_cluster for (new_cluster, old_cluster) in enumerate(unique_clusters))
-    labels_new = [mapping[cluster] for cluster in labels]
-    averages_new = averages[:, unique_clusters]
-    centers_new = centers[:, unique_clusters]
-    return averages_new, centers_new, length(unique_clusters), labels_new
-end
-
 ##
 T = 100000000.0
 dt = 0.01
