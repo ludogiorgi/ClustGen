@@ -167,7 +167,7 @@ R_gen, δObs_gen = zeros(4, dim, n_tau+1), zeros(4, dim, n_tau+1)
 
 for i in 1:4
     Obs(x) = (x .- m).^i
-    R_num[i,:,:] = generate_numerical_response3(F, u, dim, dt, n_tau, 1000, sigma, Obs, dim_Obs; n_ens=10000, resolution=10*res_trj)
+    R_num[i,:,:] = generate_numerical_response(F, u, dim, dt, n_tau, 1000, sigma, Obs, dim_Obs; n_ens=10000, resolution=10*res_trj)
     R_lin[i,:,:], δObs_lin[i,:,:] = generate_score_response(trj, u, div_u, f, score_qG, res_trj*dt, n_tau, Obs, dim_Obs)
     R_gen[i,:,:], δObs_gen[i,:,:] = generate_score_response(trj, u, div_u, f, score_gen, res_trj*dt, n_tau, Obs, dim_Obs)
     # R_test_score[i,:,:] = generate_numerical_response3(score_test, u, dim, 0.2*dt, n_tau, 1000, sigma_I, Obs, dim_Obs; n_ens=1000, resolution=5*10*res_trj)
@@ -190,6 +190,7 @@ end
 
 ##
 
+using GLMakie
 r1_min, r1_max = -5, 7.5
 r2_min, r2_max = -2.5, 7.5
 r3_min, r3_max = -5, 5
@@ -339,7 +340,7 @@ colgap!(fig.layout, 20)
 rowgap!(fig.layout, 20)
 
 # # Save figure
-save("figures/responses2_ENSO_hack4.png", fig)
+# save("figures/responses2_ENSO_hack4.png", fig)
 
 fig
 

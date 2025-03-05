@@ -54,7 +54,7 @@ end
 
 dim = 2
 dt = 0.05
-Nsteps = 10000000
+Nsteps = 200000000
 obs_nn = evolve([0.0, 0.0], dt, Nsteps, F, sigma; resolution = 1, timestepper=:rk4)
 obs = obs_nn #(obs_nn .- mean(obs_nn, dims=2)) ./ std(obs_nn, dims=2)
 
@@ -68,15 +68,18 @@ autocov_obs_mean = mean(autocov_obs, dims=1)
 Plots.plot(autocov_obs_mean[1,:], label="X", xlabel="Lag", ylabel="Autocovariance", title="Autocovariance of Observed Trajectory")
 
 ##
-obs_uncorr = obs[:, 1:1:end]
+obs_uncorr = obs[:, 1:20:end]
 
-Plots.scatter(obs_uncorr[1,1:10000], obs_uncorr[2,1:10000], markersize=1, label="", xlabel="X", ylabel="Y", title="Observed Trajectory")
 
+plt1 = Plots.scatter(obs_uncorr[1,1:100:1000000], obs_uncorr[2,1:100:1000000], markersize=1, label="", xlabel="X", ylabel="Y", title="Observed Trajectory")
+plt2 = Plots.scatter(trj_clustered[1,1:100:1000000], trj_clustered[2,1:100:1000000], markersize=1, label="", xlabel="X", ylabel="Y", title="Observed Trajectory")
+
+Plots.plot(plt1, plt2)
 ##
 ############################ CLUSTERING ####################
 
 normalization = false
-σ_value = 0.025
+σ_value = 0.1
 
 averages, centers, Nc, ssp = f_tilde_ssp(σ_value, obs_uncorr; prob=0.001, do_print=true, conv_param=0.002, normalization=normalization)
 
@@ -86,13 +89,28 @@ else
     inputs_targets = generate_inputs_targets(averages, centers, Nc; normalization=false)
 end
 
-plotly()
-targets_norm = [norm(averages[:,i]) for i in eachindex(centers[1,:])]
-Plots.scatter(centers[1,:], centers[2,:], marker_z=targets_norm, color=:viridis)
+##
+averages_true = hcat([- score_true(averages[:,i]) for i in eachindex(centers[1,:])]...)
+averages_gen = .- averages ./ σ_value
+diffs_norm = [norm(averages_true[:,i] - averages_gen[:,i]) for i in eachindex(centers[1,:])]
+
+plt1 = Plots.scatter(averages_gen[1,:], averages_gen[2,:], label="Clustered", xlabel="X", ylabel="Y", title="Averages")
+plt1 = Plots.scatter!(averages_true[1,:], averages_true[2,:], label="True", xlabel="X", ylabel="Y", title="Averages")
+
+plt2 = Plots.scatter(centers[1,:], averages_gen[1,:], label="Clustered", xlabel="X", ylabel="score X", title="Averages")
+plt2 = Plots.scatter!(centers[1,:], averages_true[1,:], label="True", xlabel="X", ylabel="score X", title="Averages")
+
+plt3 = Plots.scatter(centers[2,:], averages_gen[2,:], label="Clustered", xlabel="Y", ylabel="score Y", title="Averages")
+plt3 = Plots.scatter!(centers[2,:], averages_true[2,:], label="True", xlabel="Y", ylabel="score Y", title="Averages")
+
+plt4 = Plots.scatter(centers[1,:], centers[2,:], marker_z=diffs_norm, legend=false, xlabel="X", ylabel="Y", title="Averages")
+
+Plots.plot(plt1, plt2, plt3, plt4)
+
 ##
 #################### TRAINING WITH CLUSTERING LOSS ####################
 
-@time nn_clustered, loss_clustered = train(inputs_targets, 1000, 64, [dim, 128, 64, dim]; use_gpu=true, activation=swish, last_activation=identity)
+@time nn_clustered, loss_clustered = train(inputs_targets, 2000, 32, [dim, 128, 64, dim]; use_gpu=true, activation=swish, last_activation=identity)
 if normalization == true
     nn_clustered_cpu  = Chain(nn_clustered, x -> x .* (M_averages_values .- m_averages_values) .+ m_averages_values) |> cpu
 else
@@ -100,7 +118,6 @@ else
 end
 score_clustered(x) = .- nn_clustered_cpu(Float32.([x...]))[:] ./ σ_value
 Plots.plot(loss_clustered)
-
 ##
 #################### SAMPLES GENERATION ####################
 
@@ -134,14 +151,13 @@ plt2 = Plots.plot!(kde_qG_y.x, kde_qG_y.density, label="qG", xlabel="Y", ylabel=
 
 Plots.plot(plt1, plt2)
 ##
-kde_obs_xy = kde(obs[[1,2],:]')
-
+kde_obs_xy = kde(obs_uncorr[[1,2],:]')
 kde_clustered_xy = kde(trj_clustered[[1,2],:]')
 
-gr()
+plotly()
 
-plt1 = Plots.heatmap(kde_obs_xy.x, kde_obs_xy.y, kde_obs_xy.density, xlabel="X", ylabel="Y", title="Observed PDF XY")
-plt2 = Plots.heatmap(kde_clustered_xy.x, kde_clustered_xy.y, kde_clustered_xy.density, xlabel="X", ylabel="Y", title="Sampled PDF XY", xrange=(kde_obs_xy.x[1], kde_obs_xy.x[end]), yrange=(kde_obs_xy.y[1], kde_obs_xy.y[end]))
+plt1 = Plots.heatmap(kde_obs_xy.x, kde_obs_xy.y, kde_obs_xy.density, xlabel="X", ylabel="Y", title="Observed PDF XY", color=:viridis, clims=(minimum(kde_obs_xy.density), maximum(kde_obs_xy.density)))
+plt2 = Plots.heatmap(kde_clustered_xy.x, kde_clustered_xy.y, kde_clustered_xy.density, xlabel="X", ylabel="Y", title="Sampled PDF XY", xrange=(kde_obs_xy.x[1], kde_obs_xy.x[end]), yrange=(kde_obs_xy.y[1], kde_obs_xy.y[end]), color=:viridis, clims=(minimum(kde_obs_xy.density), maximum(kde_obs_xy.density)))
 
 Plots.plot(plt1, plt2)
 ##
@@ -154,9 +170,9 @@ steps_trj = 100000
 trj = obs[:,1:res_trj:steps_trj*res_trj]
 
 ϵ = 0.05
-u(x) = [0.05, 0.0]
+u(x) = [0.0, ϵ]
 div_u(x) = -0.0
-m = mean(obs, dims=2)
+m = mean(obs_uncorr, dims=2)
 
 F_pert(x,t) = F(x,t) + u(x) * f(t)
 
@@ -172,7 +188,7 @@ R_gen, δObs_gen = zeros(dim, n_tau+1), zeros(dim, n_tau+1)
 
 #Obs(x) = reshape([(x[1] - m[1]), (x[1] - m[1])^2, (x[1] - m[1])*(x[2] - m[2])], 1, 3)
 
-Obs(x) = x
+Obs(x) = x 
 
 R_num[:,:] = generate_numerical_response3(F, u, dim, dt, n_tau, 1000, sigma, Obs, dim_Obs; n_ens=10000, resolution=10*res_trj)
 R_lin[:,:], δObs_lin[:,:] = generate_score_response(trj, u, div_u, f, score_qG, res_trj*dt, n_tau, Obs, dim_Obs)
@@ -182,14 +198,15 @@ R_true[:,:], δObs_true[:,:] = generate_score_response(trj, u, div_u, f, score_t
 
 ##
 
-plt1 = Plots.plot(0:dt:n_tau*dt, R_num[1,:]./ϵ, label="Numerical", xlabel="Lag", ylabel="Response", title="Responses")
-plt1 = Plots.plot!(0:dt:n_tau*dt, R_lin[1,:]./ϵ, label="Linear", xlabel="Lag", ylabel="Response", title="Responses")
-plt1 = Plots.plot!(0:dt:n_tau*dt, R_gen[1,:]./ϵ, label="Generative", xlabel="Lag", ylabel="Response", title="Responses")
-plt1 = Plots.plot!(0:dt:n_tau*dt, R_true[1,:]./ϵ, label="True", xlabel="Lag", ylabel="Response", title="Responses")
+gr()
+plt1 = Plots.plot(0:dt:n_tau*dt, R_num[1,:], label="Numerical", xlabel="Lag", ylabel="Response", title="Responses")
+plt1 = Plots.plot!(0:dt:n_tau*dt, R_lin[1,:], label="Linear", xlabel="Lag", ylabel="Response", title="Responses")
+plt1 = Plots.plot!(0:dt:n_tau*dt, R_gen[1,:], label="Generative", xlabel="Lag", ylabel="Response", title="Responses")
+plt1 = Plots.plot!(0:dt:n_tau*dt, R_true[1,:], label="True", xlabel="Lag", ylabel="Response", title="Responses")
 
-plt2 = Plots.plot(0:dt:n_tau*dt, R_num[2,:]./ϵ, label="Numerical", xlabel="Lag", ylabel="Response", title="Responses")
-plt2 = Plots.plot!(0:dt:n_tau*dt, R_lin[2,:]./ϵ, label="Linear", xlabel="Lag", ylabel="Response", title="Responses")
-plt2 = Plots.plot!(0:dt:n_tau*dt, R_gen[2,:]./ϵ, label="Generative", xlabel="Lag", ylabel="Response", title="Responses")
-plt2 = Plots.plot!(0:dt:n_tau*dt, R_true[2,:]./ϵ, label="True", xlabel="Lag", ylabel="Response", title="Responses")
+plt2 = Plots.plot(0:dt:n_tau*dt, R_num[2,:], label="Numerical", xlabel="Lag", ylabel="Response", title="Responses")
+plt2 = Plots.plot!(0:dt:n_tau*dt, R_lin[2,:], label="Linear", xlabel="Lag", ylabel="Response", title="Responses")
+plt2 = Plots.plot!(0:dt:n_tau*dt, R_gen[2,:], label="Generative", xlabel="Lag", ylabel="Response", title="Responses")
+plt2 = Plots.plot!(0:dt:n_tau*dt, R_true[2,:], label="True", xlabel="Lag", ylabel="Response", title="Responses")
 
 Plots.plot(plt1, plt2)

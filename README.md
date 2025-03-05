@@ -1,22 +1,22 @@
-# ClustGen.jl
+# ClustGen
 
-**ClustGen.jl** is a Julia package for efficient score function estimation, combining **k-means clustering** with **neural network-based interpolation**. This approach reduces computational overhead, making it ideal for high-dimensional datasets.
+A comprehensive toolkit for clustering-based generative modeling of dynamical systems. This Julia package provides tools for analyzing, clustering, and generating trajectories from dynamical systems using various machine learning and statistical techniques.
 
----
+## Overview
 
-## Features
+ClustGen implements novel algorithms for estimating score functions and response properties of nonlinear stochastic systems. It combines clustering-based techniques with generative modeling to efficiently and accurately characterize complex dynamical systems, with particular applications in climate science and reduced-order modeling.
 
-- Efficient score estimation for generative modeling and statistical analysis.
-- Combines clustering algorithms with neural networks for interpolation.
-- Pre-built tools for testing on 1D and 2D systems.
-
----
+Key capabilities include:
+- Score-based generative modeling of dynamical systems
+- Generalized Fluctuation-Dissipation Theorem (GFDT) implementations
+- Clustering algorithms for efficient statistical estimation
+- Neural network autoencoders for dimensionality reduction
+- Sampling methods for data generation
+- Diffusion models with customizable noise schedules
+- Visualization tools for high-dimensional data
 
 ## Installation
 
-Install the package via:
-
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/ludogiorgi/ClustGen.jl.git")
-```
+Pkg.add(url="https://github.com/yourusername/ClustGen.jl")

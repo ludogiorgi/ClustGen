@@ -20,12 +20,6 @@ function ∇U_2D(x, t; A1=1.0, A2=1.2, B1=0.6, B2=0.3)
     return [-∇U1, -∇U2]
 end
 
-# function ∇U_2D(x, t; k=1.0)
-#     ∇U1 = k * x[1]
-#     ∇U2 = k * x[2]
-#     return [-∇U1, -∇U2]  # Negative gradient
-# end
-
 dim = 2
 dt = 0.025
 Nsteps = 20000000
