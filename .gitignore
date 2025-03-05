@@ -1,0 +1,28 @@
+# IDE specific files
+.vscode/
+
+# Data directory
+data/
+
+# Figures output
+figures/
+
+# Julia specific files
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+deps/deps.jl
+Manifest.toml
+
+# Common temp files
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
