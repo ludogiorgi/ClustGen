@@ -1,19 +1,6 @@
 # ClustGen
 
-A comprehensive toolkit for clustering-based generative modeling of dynamical systems. This Julia package provides tools for analyzing, clustering, and generating trajectories from dynamical systems using various machine learning and statistical techniques.
-
-## Overview
-
-ClustGen implements novel algorithms for estimating score functions and response properties of nonlinear stochastic systems. It combines clustering-based techniques with generative modeling to efficiently and accurately characterize complex dynamical systems, with particular applications in climate science and reduced-order modeling.
-
-Key capabilities include:
-- Score-based generative modeling of dynamical systems
-- Generalized Fluctuation-Dissipation Theorem (GFDT) implementations
-- Clustering algorithms for efficient statistical estimation
-- Neural network autoencoders for dimensionality reduction
-- Sampling methods for data generation
-- Diffusion models with customizable noise schedules
-- Visualization tools for high-dimensional data
+This code implements a hybrid methodology for efficient score function estimation and response analysis in nonlinear stochastic systems. It combines a clustering-based Gaussian Mixture Model approach with neural network interpolation to estimate the score function from large datasets, and leverages the Generalized Fluctuation-Dissipation Theorem (GFDT) to construct higher-order response functions. The code is demonstrated on reduced-order models—including triad systems and slow-fast models relevant to climate dynamics—validating its ability to accurately capture non-Gaussian effects and predict system responses to small perturbations.
 
 ## Installation
 
