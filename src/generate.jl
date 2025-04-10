@@ -245,3 +245,256 @@ Evolves a deterministic dynamical system (no noise).
 - Matrix of results with shape (dim, Nsave+1) where Nsave = ceil(Nsteps/resolution)
 """
 evolve(u0, dt, Nsteps, f; resolution=1) = evolve(u0, dt, Nsteps, f, 0.0; resolution=resolution)
+
+
+
+"""
+    evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false, n_ens=1)
+
+Evolves a stochastic dynamical system forward in time, optionally generating an ensemble of trajectories.
+
+# Arguments
+- `u0`: Initial state vector
+- `dt`: Time step size
+- `Nsteps`: Total number of steps to evolve
+- `f`: Deterministic drift function f(u, t)
+- `sigma`: Diffusion function sigma(u, t)
+- `seed`: Base random seed for reproducibility
+- `resolution`: Save results every `resolution` steps
+- `timestepper`: Integration method (`:rk4` or `:euler`)
+- `boundary`: If specified as [min, max], resets to u0 when state exceeds these bounds
+- `n_ens`: Number of ensemble trajectories to generate (parallelized if > 1)
+
+# Returns
+- Array of results with shape (dim, Nsave+1, n_ens) where Nsave = ceil(Nsteps/resolution)
+"""
+function evolve_ens(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false, n_ens=1)
+    # Initialize state and storage dimensions
+    dim = length(u0)
+    Nsave = ceil(Int, Nsteps / resolution)
+    
+    # Select integration method
+    if timestepper == :rk4
+        timestepper_fn = rk4_step!
+    elseif timestepper == :euler
+        timestepper_fn = euler_step!
+    else
+        error("Invalid timestepper specified. Use :rk4 or :euler.")
+    end
+    
+    # Create shared array for results to avoid copying between workers
+    results = n_ens > 1 ? 
+        SharedArray{Float64}(dim, Nsave+1, n_ens) : 
+        Array{Float64}(undef, dim, Nsave+1, n_ens)
+    
+    # Define the single trajectory evolution function
+    function evolve_single_trajectory(ens_idx)
+        # Create a unique seed for this ensemble member
+        trajectory_seed = seed + ens_idx * 1000
+        Random.seed!(trajectory_seed)
+        
+        # Set initial conditions
+        u = copy(u0)
+        results[:, 1, ens_idx] .= u0
+        
+        # Initialize time tracking
+        t = 0.0
+        save_index = 1
+        
+        if boundary == false
+            # Standard evolution without boundary conditions
+            for step in 1:Nsteps
+                # Get diffusion coefficient at current state
+                sig = sigma(u, t)
+                
+                # Perform deterministic step
+                timestepper_fn(u, dt, f, t)
+                
+                # Add stochastic component
+                add_noise!(u, dt, sig, dim)
+                
+                # Update time
+                t += dt
+                
+                # Save results at specified resolution
+                if step % resolution == 0
+                    save_index += 1
+                    results[:, save_index, ens_idx] .= u
+                end
+            end
+        else
+            # Evolution with boundary conditions
+            count = 0
+            for step in 1:Nsteps
+                # Get diffusion coefficient at current state
+                sig = sigma(u, t)
+                
+                # Perform deterministic step
+                timestepper_fn(u, dt, f, t)
+                
+                # Add stochastic component
+                add_noise!(u, dt, sig, dim)
+                
+                # Update time
+                t += dt
+                
+                # Reset if boundary is crossed
+                if any(u .< boundary[1]) || any(u .> boundary[2])
+                    u .= u0
+                    count += 1
+                end
+                
+                # Save results at specified resolution
+                if step % resolution == 0
+                    save_index += 1
+                    results[:, save_index, ens_idx] .= u
+                end
+            end
+            
+            if ens_idx == 1  # Only print once to avoid clutter
+                println("Percentage of boundary crossings: ", count/Nsteps)
+            end
+        end
+        
+        return nothing  # Results are stored in the shared array
+    end
+    
+    # Execute trajectories (in parallel if n_ens > 1)
+    if n_ens == 1
+        evolve_single_trajectory(1)
+    else
+        # Use distributed computing for multiple trajectories
+        @sync @distributed for i in 1:n_ens
+            evolve_single_trajectory(i)
+        end
+    end
+    
+    return Array(results)  # Convert SharedArray to regular Array before returning
+end
+
+"""
+    evolve(u0, dt, Nsteps, f, sigma1, sigma2; seed=123, resolution=1, timestepper=:rk4, n_ens=1)
+
+Evolves a stochastic dynamical system with two independent noise sources, optionally generating an ensemble of trajectories.
+
+# Arguments
+- `u0`: Initial state vector
+- `dt`: Time step size
+- `Nsteps`: Total number of steps to evolve
+- `f`: Deterministic drift function f(u, t)
+- `sigma1`: First diffusion function sigma1(u, t)
+- `sigma2`: Second diffusion function sigma2(u, t)
+- `seed`: Base random seed for reproducibility
+- `resolution`: Save results every `resolution` steps
+- `timestepper`: Integration method (`:rk4` or `:euler`)
+- `n_ens`: Number of ensemble trajectories to generate (parallelized if > 1)
+
+# Returns
+- Array of results with shape (dim, Nsave+1, n_ens) where Nsave = ceil(Nsteps/resolution)
+"""
+function evolve_ens(u0, dt, Nsteps, f, sigma1, sigma2; seed=123, resolution=1, timestepper=:rk4, n_ens=1)
+    # Initialize state and storage dimensions
+    dim = length(u0)
+    Nsave = ceil(Int, Nsteps / resolution)
+    
+    # Select integration method
+    if timestepper == :rk4
+        timestepper_fn = rk4_step!
+    elseif timestepper == :euler
+        timestepper_fn = euler_step!
+    else
+        error("Invalid timestepper specified. Use :rk4 or :euler.")
+    end
+    
+    # Create shared array for results to avoid copying between workers
+    results = n_ens > 1 ? 
+        SharedArray{Float64}(dim, Nsave+1, n_ens) : 
+        Array{Float64}(undef, dim, Nsave+1, n_ens)
+    
+    # Define the single trajectory evolution function
+    function evolve_single_trajectory(ens_idx)
+        # Create a unique seed for this ensemble member
+        trajectory_seed = seed + ens_idx * 1000
+        Random.seed!(trajectory_seed)
+        
+        # Set initial conditions
+        u = copy(u0)
+        results[:, 1, ens_idx] .= u0
+        
+        # Initialize time tracking
+        t = 0.0
+        save_index = 1
+        
+        for step in 1:Nsteps
+            # Get diffusion coefficients at current state
+            sig1 = sigma1(u, t)
+            sig2 = sigma2(u, t)
+            
+            # Perform deterministic step
+            timestepper_fn(u, dt, f, t)
+            
+            # Add stochastic components from both noise sources
+            add_noise!(u, dt, sig1, dim)
+            add_noise!(u, dt, sig2, dim)
+            
+            # Update time
+            t += dt
+            
+            # Save results at specified resolution
+            if (step-1) % resolution == 0
+                save_index += 1
+                results[:, save_index, ens_idx] .= u
+            end
+        end
+        
+        return nothing  # Results are stored in the shared array
+    end
+    
+    # Execute trajectories (in parallel if n_ens > 1)
+    if n_ens == 1
+        evolve_single_trajectory(1)
+    else
+        # Use distributed computing for multiple trajectories
+        @sync @distributed for i in 1:n_ens
+            evolve_single_trajectory(i)
+        end
+    end
+    
+    return Array(results)  # Convert SharedArray to regular Array before returning
+end
+
+"""
+    evolve(u0, dt, Nsteps, f; resolution=1, n_ens=1)
+
+Evolves a deterministic dynamical system (no noise), optionally generating an ensemble of identical trajectories.
+
+# Arguments
+- `u0`: Initial state vector
+- `dt`: Time step size
+- `Nsteps`: Total number of steps to evolve
+- `f`: Deterministic drift function f(u, t)
+- `resolution`: Save results every `resolution` steps
+- `n_ens`: Number of ensemble trajectories to generate (all identical for deterministic systems)
+
+# Returns
+- Array of results with shape (dim, Nsave+1, n_ens) where Nsave = ceil(Nsteps/resolution)
+"""
+function evolve_ens(u0, dt, Nsteps, f; resolution=1, n_ens=1)
+    # For deterministic systems, compute a single trajectory and replicate
+    trajectory = evolve_ens(u0, dt, Nsteps, f, 0.0; resolution=resolution, n_ens=n_ens)
+    
+    # If only one ensemble member requested, return as is
+    if n_ens == 1
+        return trajectory
+    end
+    
+    # Otherwise, replicate the deterministic trajectory for all ensemble members
+    dim, timesteps, _ = size(trajectory)
+    result = Array{Float64}(undef, dim, timesteps, n_ens)
+    
+    for i in 1:n_ens
+        result[:, :, i] .= trajectory[:, :, 1]
+    end
+    
+    return result
+end

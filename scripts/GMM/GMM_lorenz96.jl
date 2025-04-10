@@ -1,7 +1,6 @@
 using Pkg
 Pkg.activate(".")
 Pkg.instantiate()
-##
 
 using Revise
 using MarkovChainHammer
@@ -13,6 +12,8 @@ using BSON
 using Plots
 using LinearAlgebra
 using ProgressBars
+
+##
 
 function F(x, t; F0=6.0, nu=1.0, c=10.0, b=10.0, Nk=4, Nj=10)
     # Coupling constant: c1 = c/b
@@ -211,186 +212,16 @@ plt4 = Plots.heatmap(kde_skip_x, kde_skip_y, kde_clustered_skip_density,
                     xlabel="X", ylabel="Y", title="Generated PDF (Skip-One)")
 Plots.plot(plt1, plt2, plt3, plt4, layout=(2, 2), size=(800, 800))
 
-
 ##
-using GLMakie, ColorSchemes
+############## OBSERVATIONS GENERATION ####################
 
-function create_publication_plots(kde_true_x, kde_true_y, kde_clustered_x, kde_clustered_y,
-                                kde_consecutive_x, kde_consecutive_y, kde_true_consecutive_density,
-                                kde_clustered_consecutive_density, kde_skip_x, kde_skip_y,
-                                kde_true_skip_density, kde_clustered_skip_density)
-    
-    fig = Figure(resolution=(1200, 800), fontsize=16)
-    
-    # Create layout
-    univariate_ax = Axis(fig[1, 1], 
-                         xlabel="x[k]",
-                         ylabel="PDF",
-                         title="Univariate PDF")
-    
-    # Create colorbar for all heatmaps
-    density_max = max(
-        maximum(kde_true_consecutive_density), 
-        maximum(kde_clustered_consecutive_density),
-        maximum(kde_true_skip_density),
-        maximum(kde_clustered_skip_density)
-    )
-    
-    # Univariate plot
-    lines!(univariate_ax, kde_true_x, kde_true_y, color=:red, linewidth=2, label="True")
-    lines!(univariate_ax, kde_clustered_x, kde_clustered_y, color=:blue, linewidth=2, label="GMM")
-    axislegend(univariate_ax, position=:rt)
-    
-    # Create a 2×2 grid of heatmaps
-    heatmap_axes = [Axis(fig[2, j], aspect=1) for j in 1:2]
-    append!(heatmap_axes, [Axis(fig[3, j], aspect=1) for j in 1:2])
-    
-    # Set labels and titles for heatmaps
-    heatmap_axes[1].title = "True (x[k]-x[k+1]) PDF"
-    heatmap_axes[2].title = "GMM (x[k]-x[k+1]) PDF"
-    heatmap_axes[3].title = "True (x[k]-x[k+2]) PDF"
-    heatmap_axes[4].title = "GMM (x[k]-x[k+2]) PDF"
-    
-    for ax in heatmap_axes
-        ax.xlabel = "x[k]"
-    end
-    
-    heatmap_axes[1].ylabel = "x[k+1]"
-    heatmap_axes[2].ylabel = "x[k+1]"
-    heatmap_axes[3].ylabel = "x[k+2]"
-    heatmap_axes[4].ylabel = "x[k+2]"
-    
-    # Create heatmaps
-    hm1 = GLMakie.heatmap!(heatmap_axes[1], kde_consecutive_x, kde_consecutive_y, kde_true_consecutive_density, 
-                 colormap=:viridis, colorrange=(0, density_max))
-    hm2 = GLMakie.heatmap!(heatmap_axes[2], kde_consecutive_x, kde_consecutive_y, kde_clustered_consecutive_density, 
-                 colormap=:viridis, colorrange=(0, density_max))
-    hm3 = GLMakie.heatmap!(heatmap_axes[3], kde_skip_x, kde_skip_y, kde_true_skip_density, 
-                 colormap=:viridis, colorrange=(0, density_max))
-    hm4 = GLMakie.heatmap!(heatmap_axes[4], kde_skip_x, kde_skip_y, kde_clustered_skip_density, 
-                 colormap=:viridis, colorrange=(0, density_max))
-    
-    # Add a single colorbar for all heatmaps
-    Colorbar(fig[2:3, 3], limits=(0, density_max), colormap=:viridis, label="Probability Density")
-    
-    # Adjust layout
-    rowgap!(fig.layout, 10)
-    colgap!(fig.layout, 10)
-    
-    # Resize the univariate plot to be wider
-    colsize!(fig.layout, 1, Relative(0.7))
-    
-    return fig
-end
-
-# Usage example:
-fig = create_publication_plots(kde_true_x, kde_true_y, kde_clustered_x, kde_clustered_y,
-                             kde_consecutive_x, kde_consecutive_y, kde_true_consecutive_density,
-                             kde_clustered_consecutive_density, kde_skip_x, kde_skip_y,
-                             kde_true_skip_density, kde_clustered_skip_density)
-
-# Save the figure for publication
-# save("lorenz96_gmm_analysis.pdf", fig, pt_per_unit=1)
+obs_trj = evolve(0.01 .* randn(36), dt, 20000, F, sigma; resolution = 2)[1:4,:]
+obs_trj = ((obs_trj .- M) ./ S)[1:2,:]
+score_trj = evolve(0.01 .* randn(4), dt, 20000, score_clustered_xt, sigma_I; resolution = 2)[1:2,:]
 
 ##
 
-
-using GLMakie, ColorSchemes
-
-function create_publication_plots(kde_true_x, kde_true_y, kde_clustered_x, kde_clustered_y,
-                                kde_consecutive_x, kde_consecutive_y, kde_true_consecutive_density,
-                                kde_clustered_consecutive_density, kde_skip_x, kde_skip_y,
-                                kde_true_skip_density, kde_clustered_skip_density)
-    
-    fig = Figure(resolution=(1500, 800), fontsize=22)  # Increased base fontsize from 16 to 22
-    
-    # Create a layout with 2 columns - left half for univariate, right half for heatmaps
-    left_panel = fig[1:2, 1] = GridLayout()
-    right_panel = fig[1:2, 2] = GridLayout()
-    
-    # Create univariate axis that spans the entire left half
-    univariate_ax = Axis(left_panel[1, 1], 
-                       xlabel="x[k]",
-                       ylabel="PDF",
-                       title="Univariate PDF",
-                       titlesize=28,           # Increased titlesize
-                       xlabelsize=24,          # Increased label sizes
-                       ylabelsize=24)
-    
-    # Create colorbar for all heatmaps
-    density_max = max(
-        maximum(kde_true_consecutive_density), 
-        maximum(kde_clustered_consecutive_density),
-        maximum(kde_true_skip_density),
-        maximum(kde_clustered_skip_density)
-    )
-    
-    # Univariate plot
-    lines!(univariate_ax, kde_true_x, kde_true_y, color=:red, linewidth=3, label="True")
-    lines!(univariate_ax, kde_clustered_x, kde_clustered_y, color=:blue, linewidth=3, label="GMM")
-    axislegend(univariate_ax, position=:rt, framevisible=true, bgcolor=:white, labelsize=22)  # Increased legend size
-    
-    # Create a 2×2 grid of heatmaps in the right half
-    heatmap_axes = [
-        Axis(right_panel[1, 1], aspect=1, titlesize=24, xlabelsize=22, ylabelsize=22),
-        Axis(right_panel[1, 2], aspect=1, titlesize=24, xlabelsize=22, ylabelsize=22),
-        Axis(right_panel[2, 1], aspect=1, titlesize=24, xlabelsize=22, ylabelsize=22),
-        Axis(right_panel[2, 2], aspect=1, titlesize=24, xlabelsize=22, ylabelsize=22)
-    ]
-    
-    # Set labels and titles for heatmaps
-    heatmap_axes[1].title = "True (x[k]-x[k+1]) PDF"
-    heatmap_axes[2].title = "GMM (x[k]-x[k+1]) PDF"
-    heatmap_axes[3].title = "True (x[k]-x[k+2]) PDF"
-    heatmap_axes[4].title = "GMM (x[k]-x[k+2]) PDF"
-    
-    for ax in heatmap_axes
-        ax.xlabel = "x[k]"
-    end
-    
-    heatmap_axes[1].ylabel = "x[k+1]"
-    heatmap_axes[2].ylabel = "x[k+1]"
-    heatmap_axes[3].ylabel = "x[k+2]"
-    heatmap_axes[4].ylabel = "x[k+2]"
-    
-    # Create heatmaps
-    hm1 = GLMakie.heatmap!(heatmap_axes[1], kde_consecutive_x, kde_consecutive_y, kde_true_consecutive_density, 
-                 colormap=:viridis, colorrange=(0, density_max))
-    hm2 = GLMakie.heatmap!(heatmap_axes[2], kde_consecutive_x, kde_consecutive_y, kde_clustered_consecutive_density, 
-                 colormap=:viridis, colorrange=(0, density_max))
-    hm3 = GLMakie.heatmap!(heatmap_axes[3], kde_skip_x, kde_skip_y, kde_true_skip_density, 
-                 colormap=:viridis, colorrange=(0, density_max))
-    hm4 = GLMakie.heatmap!(heatmap_axes[4], kde_skip_x, kde_skip_y, kde_clustered_skip_density, 
-                 colormap=:viridis, colorrange=(0, density_max))
-    
-    # Add a single colorbar for all heatmaps with larger font
-    Colorbar(fig[1:2, 3], limits=(0, density_max), colormap=:viridis, 
-             label="", labelsize=24, ticklabelsize=20,
-             width=30)
-    
-    # Adjust layout with more space for larger fonts
-    colgap!(right_panel, 15)
-    rowgap!(right_panel, 15)
-    
-    # Ensure the two main panels have equal width
-    colsize!(fig.layout, 1, Relative(0.5))
-    colsize!(fig.layout, 2, Relative(0.45))
-    
-    return fig
-end
-
-# Usage example:
-fig = create_publication_plots(kde_true_x, kde_true_y, kde_clustered_x, kde_clustered_y,
-                             kde_consecutive_x, kde_consecutive_y, kde_true_consecutive_density,
-                             kde_clustered_consecutive_density, kde_skip_x, kde_skip_y,
-                             kde_true_skip_density, kde_clustered_skip_density)
-
-# Save the figure for publication
-# save("figures/GMM_figures/lorenz96.png", fig)
-
-##
-
-function save_lorenz96_plot_data(filename="data/GMM_data/lorenz96.h5")
+function save_lorenz96_plot_data(filename="data/GMM_data/lorenz96_2.h5")
     # Create directory structure if it doesn't exist
     mkpath(dirname(filename))
     
@@ -442,8 +273,8 @@ function save_lorenz96_plot_data(filename="data/GMM_data/lorenz96.h5")
         write(file, "σ_value", σ_value)
         
         # Save sample data points (for reference)
-        write(file, "obs_sample", obs[:, 1:min(1000, size(obs, 2))])
-        write(file, "trj_clustered_sample", trj_clustered[:, 1:min(1000, size(trj_clustered, 2))])
+        write(file, "obs_trj", obs_trj)
+        write(file, "score_trj", score_trj)
         
         # Save normalization parameters
         write(file, "M", M)
@@ -484,8 +315,8 @@ function read_lorenz96_plot_data(filename="data/GMM_data/lorenz96.h5")
         data["σ_value"] = read(file, "σ_value")
         
         # Read sample data
-        data["obs_sample"] = read(file, "obs_sample")
-        data["trj_clustered_sample"] = read(file, "trj_clustered_sample")
+        data["obs_trj"] = read(file, "obs_trj")
+        data["score_trj"] = read(file, "score_trj")
         
         # Read normalization parameters
         data["M"] = read(file, "M")
@@ -499,8 +330,125 @@ end
 # Save the data
 save_lorenz96_plot_data()
 
+##
+
+function create_publication_plots(kde_true_x, kde_true_y, kde_clustered_x, kde_clustered_y,
+    kde_consecutive_x, kde_consecutive_y, kde_true_consecutive_density,
+    kde_clustered_consecutive_density, kde_skip_x, kde_skip_y,
+    kde_true_skip_density, kde_clustered_skip_density, obs_trj, score_trj, dt)
+
+# Increased size to accommodate the new row
+fig = Figure(resolution=(2250, 2250), fontsize=32)
+
+# Create a 3-row layout
+main_layout = fig[1:3, 1:3] = GridLayout()
+
+# Row 1: Time series plots (new addition)
+time_panel = main_layout[1, 1:3] = GridLayout()
+
+# Rows 2-3: Original layout with univariate and bivariate plots
+left_panel = main_layout[2:3, 1] = GridLayout()
+right_panel = main_layout[2:3, 2:3] = GridLayout()
+
+# Create time series axes for x[1] and x[2]
+time_ax1 = Axis(time_panel[1, 1:2], 
+xlabel="t",
+ylabel="x[k]",
+title="x[k] Time Series",
+titlesize=36,
+xlabelsize=32,
+ylabelsize=32)
+
+# Plot time series data
+n_points = 10000
+time_vector = (1:2:n_points) .* dt .* 2
+
+# First component
+lines!(time_ax1, time_vector, obs_trj[1, 1:2:n_points], 
+color=:red, linewidth=1, label="True")
+lines!(time_ax1, time_vector, score_trj[1, 1:2:n_points], 
+color=:blue, linewidth=1, label="GMM")
+# axislegend(time_ax1, position=:rt, framevisible=true, bgcolor=:white, labelsize=22)
+
+# Create univariate axis that spans the left half
+univariate_ax = Axis(left_panel[1, 1], 
+xlabel="x[k]",
+ylabel="PDF",
+title="Univariate PDF",
+titlesize=36,
+xlabelsize=32,
+ylabelsize=32)
+
+# Create colorbar for all heatmaps
+density_max = max(
+maximum(kde_true_consecutive_density), 
+maximum(kde_clustered_consecutive_density),
+maximum(kde_true_skip_density),
+maximum(kde_clustered_skip_density)
+)
+
+# Univariate plot
+lines!(univariate_ax, kde_true_x, kde_true_y, color=:red, linewidth=2, label="True")
+lines!(univariate_ax, kde_clustered_x, kde_clustered_y, color=:blue, linewidth=2, label="KGMM")
+axislegend(univariate_ax, position=:rt, framevisible=true, bgcolor=:white, labelsize=32)
+
+# Create a 2×2 grid of heatmaps in the right half
+heatmap_axes = [
+Axis(right_panel[1, 1], titlesize=36, xlabelsize=32, ylabelsize=32),
+Axis(right_panel[1, 2], titlesize=36, xlabelsize=32, ylabelsize=32),
+Axis(right_panel[2, 1], titlesize=36, xlabelsize=32, ylabelsize=32),
+Axis(right_panel[2, 2], titlesize=36, xlabelsize=32, ylabelsize=32)
+]
+
+# Set labels and titles for heatmaps
+heatmap_axes[1].title = "True (x[k]-x[k+1]) PDF"
+heatmap_axes[2].title = "KGMM (x[k]-x[k+1]) PDF"
+heatmap_axes[3].title = "True (x[k]-x[k+2]) PDF"
+heatmap_axes[4].title = "KGMM (x[k]-x[k+2]) PDF"
+
+for ax in heatmap_axes
+ax.xlabel = "x[k]"
+end
+
+heatmap_axes[1].ylabel = "x[k+1]"
+heatmap_axes[2].ylabel = "x[k+1]"
+heatmap_axes[3].ylabel = "x[k+2]"
+heatmap_axes[4].ylabel = "x[k+2]"
+
+# Create heatmaps
+hm1 = GLMakie.heatmap!(heatmap_axes[1], kde_consecutive_x, kde_consecutive_y, kde_true_consecutive_density, 
+colormap=:viridis, colorrange=(0, density_max))
+hm2 = GLMakie.heatmap!(heatmap_axes[2], kde_consecutive_x, kde_consecutive_y, kde_clustered_consecutive_density, 
+colormap=:viridis, colorrange=(0, density_max))
+hm3 = GLMakie.heatmap!(heatmap_axes[3], kde_skip_x, kde_skip_y, kde_true_skip_density, 
+colormap=:viridis, colorrange=(0, density_max))
+hm4 = GLMakie.heatmap!(heatmap_axes[4], kde_skip_x, kde_skip_y, kde_clustered_skip_density, 
+colormap=:viridis, colorrange=(0, density_max))
+
+# Add a single colorbar for all heatmaps with larger font
+Colorbar(fig[2:3, 4], limits=(0, density_max), colormap=:viridis, ticklabelsize=32,
+width=30)
+
+# Adjust layout with more space for larger fonts
+colgap!(main_layout, 15)
+rowgap!(main_layout, 15)
+colgap!(right_panel, 15)
+rowgap!(right_panel, 15)
+colgap!(time_panel, 15)
+
+# Balance row sizes
+rowsize!(main_layout, 1, Relative(0.3))  # Time series row
+rowsize!(main_layout, 2, Relative(0.35)) # First row of original plots
+rowsize!(main_layout, 3, Relative(0.35)) # Second row of original plots
+
+# Add a title at the top
+Label(fig[0, 1:3], text=" ", fontsize=34, font=:bold)
+
+return fig
+end
+
 # Example of how to load and use the data to create the plot
-function create_plot_from_file(filename="data/GMM_data/lorenz96.h5")
+function create_plot_from_file(filename="data/GMM_data/lorenz96_2.h5")
     data = read_lorenz96_plot_data(filename)
     
     return create_publication_plots(
@@ -515,10 +463,13 @@ function create_plot_from_file(filename="data/GMM_data/lorenz96.h5")
         data["kde_skip_x"], 
         data["kde_skip_y"],
         data["kde_true_skip_density"], 
-        data["kde_clustered_skip_density"]
+        data["kde_clustered_skip_density"],
+        data["obs_trj"],
+        data["score_trj"],
+        data["dt"],
     )
 end
 
 # Create the plot from saved data
 fig = create_plot_from_file()
-#save("figures/GMM_figures/lorenz96.png", fig)
+save("figures/GMM_figures/lorenz96.png", fig)

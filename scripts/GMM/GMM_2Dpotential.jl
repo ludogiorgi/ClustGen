@@ -1,7 +1,7 @@
 using Pkg
 Pkg.activate(".")
 Pkg.instantiate()
-##
+
 using Revise
 using ClustGen
 using StateSpacePartitions
@@ -22,6 +22,7 @@ using MarkovChainHammer
 import MarkovChainHammer.Trajectory: ContinuousTimeEmpiricalProcess
 import LaTeXStrings
 using ColorSchemes
+##
 
 
 function F(x, t; A1=1.0, A2=1.2, B1=0.6, B2=0.3)
@@ -139,6 +140,42 @@ plt2 = Plots.plot!(kde_true_y.x, kde_true_y.density, label="True", xlabel="Y", y
 
 Plots.plot(plt1, plt2, layout=(2, 1), size=(800, 600))
 ##
+############## OBSERVATIONS GENERATION ####################
+
+obs_trj = evolve([0.0, 0.0], dt, 10000, F, sigma; timestepper=:rk4)
+obs_trj = (obs_trj .- M) ./ S
+score_trj = evolve([0.0, 0.0], 0.1*dt, 100000, score_clustered_xt, sigma_I; timestepper=:rk4, resolution=10)
+##
+
+# Create vector field data
+n_grid = 50
+d_grid = 1/10
+c_grid = [((n_grid+1)*d_grid)/2, ((n_grid+1)*d_grid)/2]
+
+x = range(-c_grid[1], stop=c_grid[1], length=n_grid)
+y = range(-c_grid[2], stop=c_grid[2], length=n_grid)
+
+u_true = zeros(n_grid, n_grid)
+v_true = zeros(n_grid, n_grid)
+u_clustered = zeros(n_grid, n_grid)
+v_clustered = zeros(n_grid, n_grid)
+
+for i in 1:n_grid
+    for j in 1:n_grid
+        u_true[j, i], v_true[j, i] = score_true([x[i], y[j]], 0.0)
+        u_clustered[j, i], v_clustered[j, i] = score_clustered([x[i], y[j]])
+    end
+end
+
+# Calculate vector field magnitudes
+mag_true = sqrt.(u_true.^2 .+ v_true.^2)
+mag_clustered = sqrt.(u_clustered.^2 .+ v_clustered.^2)
+
+# Calculate bivariate KDEs
+kde_obs_xy = kde((obs[1,:], obs[2,:]))
+kde_clustered_xy = kde((trj_clustered[1,:], trj_clustered[2,:]))
+
+##
 
 # Create directory structure if it doesn't exist
 mkpath("data/GMM_data")
@@ -181,13 +218,9 @@ h5open("data/GMM_data/2D_potential.h5", "w") do file
     write(file, "kde_clustered_xy_y", collect(kde_clustered_xy.y))
     write(file, "kde_clustered_xy_density", kde_clustered_xy.density)
     
-    # Write plot limits
-    write(file, "xlims", collect(xlims))
-    write(file, "ylims", collect(ylims))
-    
     # Write original data samples
-    write(file, "obs_sample", obs[:,1:min(10000, size(obs, 2))])
-    write(file, "trj_clustered_sample", trj_clustered[:,1:min(10000, size(trj_clustered, 2))])
+    write(file, "obs_trj", obs_trj)
+    write(file, "score_trj", score_trj)
     
     # Write statistics
     write(file, "M", M)
@@ -242,13 +275,9 @@ function read_2D_potential_data(filename="data/GMM_data/2D_potential.h5")
         data["kde_clustered_xy_y"] = read(file, "kde_clustered_xy_y")
         data["kde_clustered_xy_density"] = read(file, "kde_clustered_xy_density")
         
-        # Read plot limits
-        data["xlims"] = Tuple(read(file, "xlims"))
-        data["ylims"] = Tuple(read(file, "ylims"))
-        
         # Read original data samples
-        data["obs_sample"] = read(file, "obs_sample")
-        data["trj_clustered_sample"] = read(file, "trj_clustered_sample")
+        data["obs_trj"] = read(file, "obs_trj")
+        data["score_trj"] = read(file, "score_trj")
         
         # Read statistics
         data["M"] = read(file, "M")
@@ -257,7 +286,7 @@ function read_2D_potential_data(filename="data/GMM_data/2D_potential.h5")
         # Read averages and centers
         data["averages"] = read(file, "averages")
         data["centers"] = read(file, "centers")
-        data["averages_true"] = read(file, "averages_true")
+        data["obs_trj"] = read(file, "obs_trj")
         data["averages_gen"] = read(file, "averages_gen")
     end
     return data
@@ -297,93 +326,117 @@ kde_clustered_xy_x = data["kde_clustered_xy_x"]
 kde_clustered_xy_y = data["kde_clustered_xy_y"]
 kde_clustered_xy_density = data["kde_clustered_xy_density"]
 
-xlims = data["xlims"]
-ylims = data["ylims"]
-obs_sample = data["obs_sample"]
-trj_clustered_sample = data["trj_clustered_sample"]
+obs_sample = data["obs_trj"]
+trj_clustered_sample = data["score_trj"]
 M = data["M"]
 S = data["S"]
 averages = data["averages"]
 centers = data["centers"]
-averages_true = data["averages_true"]
+averages_true = data["averages"]
 averages_gen = data["averages_gen"]
 
 println("Data loaded successfully")
 
-
 ##
 
-# Create vector field data
-n_grid = 50
-d_grid = 1/10
-c_grid = [((n_grid+1)*d_grid)/2, ((n_grid+1)*d_grid)/2]
 
-x = range(-c_grid[1], stop=c_grid[1], length=n_grid)
-y = range(-c_grid[2], stop=c_grid[2], length=n_grid)
+# Create main figure with wider aspect ratio for 3x8 layout 
+# (wider to accommodate colorbars without using insert!)
+fig = GLMakie.Figure(size=(2500, 1400), fontsize=28)
 
-u_true = zeros(n_grid, n_grid)
-v_true = zeros(n_grid, n_grid)
-u_clustered = zeros(n_grid, n_grid)
-v_clustered = zeros(n_grid, n_grid)
+# Create layout for 3x8 grid that includes space for colorbars from the start
+grid = fig[1:3, 1:8] = GLMakie.GridLayout(3, 8)
 
-for i in 1:n_grid
-    for j in 1:n_grid
-        u_true[j, i], v_true[j, i] = score_true([x[i], y[j]], 0.0)
-        u_clustered[j, i], v_clustered[j, i] = score_clustered([x[i], y[j]])
-    end
-end
+# Create the new time series plots in the top row with equal sizes
+ax_time_x = GLMakie.Axis(grid[1, 1:4], 
+    xlabel="t", ylabel="x",
+    title="x Time Series",
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-# Calculate vector field magnitudes
-mag_true = sqrt.(u_true.^2 .+ v_true.^2)
-mag_clustered = sqrt.(u_clustered.^2 .+ v_clustered.^2)
+ax_time_y = GLMakie.Axis(grid[1, 5:8], 
+    xlabel="t", ylabel="y",
+    title="y Time Series",
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-# # Calculate bivariate KDEs
-# kde_obs_xy = kde((obs[1,:], obs[2,:]))
-# kde_clustered_xy = kde((trj_clustered[1,:], trj_clustered[2,:]))
-##
-
-# Create main figure with wider aspect ratio for 2x3 layout
-fig = GLMakie.Figure(size=(2000, 1000), fontsize=22)
-
-# Create layout for 2x3 grid with space for colorbars
-grid = fig[1:2, 1:3] = GLMakie.GridLayout(2, 3)
-
-# Define axes as before
-ax_vf_true = GLMakie.Axis(grid[1, 1], 
+# Force field plots (first two columns)
+ax_vf_true = GLMakie.Axis(grid[2, 1:2], 
     xlabel="x", ylabel="y",
-    title="True Force Field",
-    aspect=GLMakie.DataAspect(),
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    title="True Score",
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-ax_vf_clustered = GLMakie.Axis(grid[2, 1], 
+ax_vf_clustered = GLMakie.Axis(grid[3, 1:2], 
     xlabel="x", ylabel="y",
-    title="GMM Force Field",
-    aspect=GLMakie.DataAspect(),
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    title="KGMM Score",
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-# Second column: Univariate PDFs
-ax_pdf_x = GLMakie.Axis(grid[1, 2],
+# PDFs (columns 4-5)
+ax_pdf_x = GLMakie.Axis(grid[2, 4:5],
     xlabel="x", ylabel="PDF",
     title="Univariate x PDFs",
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-ax_pdf_y = GLMakie.Axis(grid[2, 2],
+ax_pdf_y = GLMakie.Axis(grid[3, 4:5],
     xlabel="y", ylabel="PDF", 
     title="Univariate y PDFs",
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-# Third column: Bivariate PDFs
-ax_true_xy = GLMakie.Axis(grid[1, 3],
+# Bivariate PDFs (last two columns)
+ax_true_xy = GLMakie.Axis(grid[2, 6:7],
     xlabel="x", ylabel="y",
     title="Bivariate True PDF",
-    aspect=GLMakie.DataAspect(),
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-ax_clustered_xy = GLMakie.Axis(grid[2, 3],
+ax_clustered_xy = GLMakie.Axis(grid[3, 6:7],
     xlabel="x", ylabel="y",
-    title="Bivariate GMM PDF",
-    aspect=GLMakie.DataAspect(),
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    title="Bivariate KGMM PDF",
+    titlesize=36, xlabelsize=32, ylabelsize=32)
+
+# Colorbars in dedicated columns
+force_bar = GLMakie.Colorbar(grid[2:3, 3], 
+              colormap=:viridis, 
+              limits=(0, vf_vmax),
+              labelsize=32,
+              vertical=true,
+              width=20)
+
+pdf_bar = GLMakie.Colorbar(grid[2:3, 8], 
+              colormap=:viridis, 
+              limits=(0, pdf_vmax),
+              labelsize=32,
+              vertical=true,
+              width=20)
+
+# Adjust column widths 
+GLMakie.colsize!(grid, 3, GLMakie.Relative(0.05))  # Narrow column for force colorbar
+GLMakie.colsize!(grid, 8, GLMakie.Relative(0.05))  # Narrow column for PDF colorbar
+GLMakie.colsize!(grid, 1, GLMakie.Relative(0.15))  # Force field column 1
+GLMakie.colsize!(grid, 2, GLMakie.Relative(0.15))  # Force field column 2
+GLMakie.colsize!(grid, 4, GLMakie.Relative(0.15))  # PDF column 1
+GLMakie.colsize!(grid, 5, GLMakie.Relative(0.15))  # PDF column 2
+GLMakie.colsize!(grid, 6, GLMakie.Relative(0.15))  # Bivariate column 1
+GLMakie.colsize!(grid, 7, GLMakie.Relative(0.15))  # Bivariate column 2
+
+# Plot time series data in the top row
+# Select a subset of time points for better visualization
+time_subset = 1:1:1000
+time_points = collect(time_subset) .* dt
+
+# X component time series
+GLMakie.lines!(ax_time_x, time_points, obs_sample[1, time_subset], 
+       color=:red, linewidth=1, label="True")
+GLMakie.lines!(ax_time_x, time_points, trj_clustered_sample[1, time_subset], 
+       color=:blue, linewidth=1, label="KGMM")
+
+# Y component time series  
+GLMakie.lines!(ax_time_y, time_points, obs_sample[2, time_subset], 
+       color=:red, linewidth=1)
+GLMakie.lines!(ax_time_y, time_points, trj_clustered_sample[2, time_subset], 
+       color=:blue, linewidth=1)
+
+# Set same x-axis limits for both time series plots
+time_xlims = (minimum(time_points), maximum(time_points))
+GLMakie.xlims!(ax_time_x, time_xlims)
+GLMakie.xlims!(ax_time_y, time_xlims)
 
 # Vector field plots
 x_points = repeat(x, outer=length(y))
@@ -403,9 +456,10 @@ v_true_norm = v_true_flat ./ max.(mag_true_flat, 1e-10) .* scale
 u_clustered_norm = u_clustered_flat ./ max.(mag_clustered_flat, 1e-10) .* scale
 v_clustered_norm = v_clustered_flat ./ max.(mag_clustered_flat, 1e-10) .* scale
 
+# Use the same max value for both vector fields for consistent coloring
 vf_vmax = maximum(mag_clustered_flat)
 
-# Arrow plots with individual colorbars
+# Arrow plots with identical colormap range
 arrow_true = GLMakie.arrows!(ax_vf_true, x_points, y_points, u_true_norm, v_true_norm, 
        arrowsize=1,
        linewidth=1,
@@ -420,79 +474,53 @@ arrow_clustered = GLMakie.arrows!(ax_vf_clustered, x_points, y_points, u_cluster
        colormap=:viridis,
        colorrange=(0, vf_vmax))
 
-# Individual colorbars for vector fields
-force_bar_true = GLMakie.Colorbar(fig[1:2, 1], 
-              colormap=:viridis, 
-              limits=(0, vf_vmax),
-              label=" ",
-              labelsize=24,
-              vertical=true,
-              flipaxis=false,
-              width=25)
-
-
 # Univariate PDFs - add legend to BOTH plots
-# MODIFIED: Using the direct x and density arrays instead of KDEResult fields
 GLMakie.lines!(ax_pdf_x, kde_true_x_x, kde_true_x_density, 
        color=:red, linewidth=2, label="True")
 GLMakie.lines!(ax_pdf_x, kde_clustered_x_x, kde_clustered_x_density, 
-       color=:blue, linewidth=2, label="GMM")
-GLMakie.axislegend(ax_pdf_x, position=:lt, labelsize=20)
+       color=:blue, linewidth=2, label="KGMM")
+GLMakie.axislegend(ax_pdf_x, position=:lt, labelsize=32)
 
-# MODIFIED: Using the direct x and density arrays instead of KDEResult fields
 GLMakie.lines!(ax_pdf_y, kde_true_y_x, kde_true_y_density, 
-       color=:red, linewidth=2, legend=false)
+       color=:red, linewidth=2, label="True")
 GLMakie.lines!(ax_pdf_y, kde_clustered_y_x, kde_clustered_y_density, 
-       color=:blue, linewidth=2, legend=false)
+       color=:blue, linewidth=2, label="KGMM")
 
-# Bivariate PDFs with individual limits
-# MODIFIED: Using direct density arrays
-pdf_true_vmax = maximum(kde_obs_xy_density)
-pdf_clustered_vmax = maximum(kde_clustered_xy_density)
+# Bivariate PDFs with consistent limits
+# Use the same max value for both PDFs for consistent coloring
+pdf_vmax = max(maximum(kde_obs_xy_density), maximum(kde_clustered_xy_density))
 
-# Individual heatmaps with separate color ranges
-# MODIFIED: Using direct x, y, and density arrays
+# Individual heatmaps with consistent color ranges
 hm1 = GLMakie.heatmap!(ax_true_xy, 
          kde_obs_xy_x, kde_obs_xy_y, kde_obs_xy_density,
          colormap=:viridis, 
-         colorrange=(0, pdf_true_vmax))
+         colorrange=(0, pdf_vmax))
 
 hm2 = GLMakie.heatmap!(ax_clustered_xy, 
          kde_clustered_xy_x, kde_clustered_xy_y, kde_clustered_xy_density,
          colormap=:viridis, 
-         colorrange=(0, pdf_clustered_vmax))
+         colorrange=(0, pdf_vmax))
 
-# Set limits for bivariate plots to match
-GLMakie.xlims!(ax_true_xy, xlims)
-GLMakie.ylims!(ax_true_xy, ylims)
-GLMakie.xlims!(ax_clustered_xy, xlims)
-GLMakie.ylims!(ax_clustered_xy, ylims)
+# Set limits for bivariate plots if needed
+# Use the same limits for consistent comparison
+x_limits = (minimum(kde_obs_xy_x), maximum(kde_obs_xy_x))
+y_limits = (minimum(kde_obs_xy_y), maximum(kde_obs_xy_y))
+GLMakie.xlims!(ax_true_xy, x_limits)
+GLMakie.ylims!(ax_true_xy, y_limits)
+GLMakie.xlims!(ax_clustered_xy, x_limits)
+GLMakie.ylims!(ax_clustered_xy, y_limits)
 
-# Individual colorbars for PDFs
-pdf_bar_true = GLMakie.Colorbar(fig[1:2, 3], 
-              colormap=:viridis, 
-              limits=(0, pdf_true_vmax),
-              label=" ",
-              labelsize=24,
-              vertical=true,
-              flipaxis=false,
-              width=25)
-
-# Adjust column widths for better spacing
-GLMakie.colsize!(grid, 1, GLMakie.Relative(0.33))
-GLMakie.colsize!(grid, 2, GLMakie.Relative(0.33))
-GLMakie.colsize!(grid, 3, GLMakie.Relative(0.33))
-
-# Adjust spacing
-GLMakie.colgap!(fig.layout, -15)
-GLMakie.rowgap!(fig.layout, 25)
+# Adjust spacing between plots
+GLMakie.colgap!(grid, 10)  # Horizontal spacing
+GLMakie.rowgap!(grid, 15)  # Vertical spacing
 
 # Add a title
-GLMakie.Label(fig[0, 1:3], text=" ", fontsize=36, font=:bold)
+GLMakie.Label(fig[0, 1:8], text="", fontsize=40, font=:bold)
 
 # Make sure the figures directory exists
 mkpath("figures/GMM_figures")
 
 # Save the figure
-#save("figures/GMM_figures/2D_potential.png", fig)
+GLMakie.save("figures/GMM_figures/2D_potential.png", fig)
+
 fig

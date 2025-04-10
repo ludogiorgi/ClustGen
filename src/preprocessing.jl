@@ -1,3 +1,45 @@
+
+"""
+    parallel_assign_labels(x, state_space_partitions)
+
+Assign cluster labels to data points using multi-threaded parallelization.
+
+# Arguments
+- `x`: Input data matrix with shape (dimensions, n_points)
+- `state_space_partitions`: StateSpacePartition object with an embedding method
+
+# Returns
+- Vector of integer labels for each data point
+
+# Note
+This function uses all available threads to speed up label assignment for large datasets
+while providing a thread-safe progress bar.
+"""
+
+function parallel_assign_labels(x, state_space_partitions)
+    n_points = size(x, 2)
+    labels = zeros(Int, n_points)
+    
+    # Create a thread-safe progress meter
+    prog = Progress(n_points, desc="Assigning labels: ", barglyphs=BarGlyphs("[=> ]"))
+    
+    # Use a ReentrantLock for safe progress updates
+    prog_lock = ReentrantLock()
+    
+    # Parallelize the label assignment
+    Threads.@threads for i in 1:n_points
+        # Compute embedding for this data point
+        labels[i] = state_space_partitions.embedding(x[:,i])
+        
+        # Safely update progress bar
+        lock(prog_lock) do
+            next!(prog)
+        end
+    end
+    
+    return labels
+end
+
 """
     generate_xz(y, sigma)
 
@@ -19,7 +61,7 @@ end
 """
     calculate_averages(X, z, x, y)
 
-Calculate cluster centers and average values for each cluster.
+Calculate cluster centers and average values for each cluster with parallel processing.
 
 # Arguments
 - `X`: Cluster labels/indices for each point
@@ -40,31 +82,49 @@ function calculate_averages(X, z, x, y)
     averages_residual = zeros(Ndim, Nc)
     centers = zeros(Ndim, Nc)
     
-    # Initialize accumulators for sums
-    z_sum = zeros(Ndim, Nc)
-    x_sum = zeros(Ndim, Nc)
-    y_sum = zeros(Ndim, Nc)
-    count = zeros(Ndim, Nc)
+    # Thread-local storage to avoid race conditions
+    n_threads = Threads.nthreads()
+    local_z_sum = [zeros(Ndim, Nc) for _ in 1:n_threads]
+    local_x_sum = [zeros(Ndim, Nc) for _ in 1:n_threads]
+    local_y_sum = [zeros(Ndim, Nc) for _ in 1:n_threads]
+    local_count = [zeros(Int, Nc) for _ in 1:n_threads]
     
-    # Accumulate sums for each cluster
-    for i in 1:Nz
+    # Create a thread-safe progress meter
+    prog = Progress(Nz, desc="Calculating averages: ", barglyphs=BarGlyphs("[=> ]"))
+    prog_lock = ReentrantLock()
+    
+    # Parallel accumulation of sums
+    Threads.@threads for i in 1:Nz
+        tid = Threads.threadid()
         segment_index = X[i]
-        for dim in 1:Ndim
-            z_sum[dim, segment_index] += z[dim, i]
-            x_sum[dim, segment_index] += x[dim, i]
-            y_sum[dim, segment_index] += y[dim, i]
-            count[dim, segment_index] += 1
+        
+        # Thread-local updates
+        @views local_z_sum[tid][:, segment_index] .+= z[:, i]
+        @views local_x_sum[tid][:, segment_index] .+= x[:, i]
+        @views local_y_sum[tid][:, segment_index] .+= y[:, i]
+        local_count[tid][segment_index] += 1
+        
+        # Update progress safely
+        lock(prog_lock) do
+            next!(prog)
         end
     end
     
-    # Calculate averages per cluster
-    for dim in 1:Ndim
-        for i in 1:Nc
-            if count[dim, i] != 0
-                averages[dim, i] = z_sum[dim, i] / count[dim, i]
-                averages_residual[dim, i] = y_sum[dim, i] / count[dim, i]
-                centers[dim, i] = x_sum[dim, i] / count[dim, i]
-            end
+    # Combine thread-local results
+    z_sum = sum(local_z_sum)
+    x_sum = sum(local_x_sum)
+    y_sum = sum(local_y_sum)
+    count = sum(local_count)
+    
+    # Calculate averages using vectorized operations
+    for i in 1:Nc
+        if count[i] > 0
+            # Pre-compute inverse count for faster division
+            inv_count = 1.0 / count[i]
+            # Vectorized multiplication instead of division in a loop
+            @views averages[:, i] .= z_sum[:, i] .* inv_count
+            @views averages_residual[:, i] .= y_sum[:, i] .* inv_count 
+            @views centers[:, i] .= x_sum[:, i] .* inv_count
         end
     end
     
@@ -195,23 +255,24 @@ function f_tilde_σ(σ::Float64, μ; prob = 0.001, do_print=false, conv_param=1e
     # Create partition of state space
     state_space_partitions = StateSpacePartition(x; method = method)
     Nc = maximum(state_space_partitions.partitions)
+    println("Number of clusters: $Nc")
     
     # Get cluster labels for each point
-    labels = [state_space_partitions.embedding(x[:,i]) for i in 1:size(x)[2]]
+    labels = parallel_assign_labels(x, state_space_partitions)
     
     # Calculate initial averages
     averages, averages_residual, centers = calculate_averages(labels, z, x, μ)
     averages_old, averages_residual_old, centers_old = averages, averages_residual, centers
     
     # Iterative refinement
-    D_avr_temp = 1
+    D_avr_temp = 1.0
     i = 1
     while D_avr_temp > conv_param && i < i_max
         # Generate new perturbed data
         x, z = generate_xz(μ, σ)
         
         # Apply partition
-        labels = [state_space_partitions.embedding(x[:,i]) for i in 1:size(x)[2]]
+        labels = parallel_assign_labels(x, state_space_partitions)
         
         # Calculate new averages
         averages, averages_residual, centers = calculate_averages(labels, z, x, μ)

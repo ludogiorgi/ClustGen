@@ -1,7 +1,6 @@
 using Pkg
 Pkg.activate(".")
 Pkg.instantiate()
-##
 
 using Revise
 using MarkovChainHammer
@@ -13,6 +12,9 @@ using BSON
 using Plots
 using LinearAlgebra
 using ProgressBars
+using GLMakie
+
+##
 
 function F(x, t; σ=10.0, ρ=28.0, β=8/3)
     F1 = σ * (x[2] - x[1])
@@ -114,7 +116,7 @@ Plots.plot(loss_clustered)
 score_clustered_xt(x,t) = score_clustered(x)
 sigma_I(x,t) = 1.0
 
-trj_clustered = evolve([0.0, 0.0, 0.0], 0.5*dt, 10000000, score_clustered_xt, sigma_I; timestepper=:rk4, resolution=2, boundary=[-100,100])
+trj_clustered = evolve([0.0, 0.0, 0.0], 0.5*dt, Nsteps, score_clustered_xt, sigma_I; timestepper=:rk4, resolution=2, boundary=[-100,100])
 # trj_score = evolve([0.0, 0.0], dt, 1000000, score_true, sigma_I; timestepper=:rk4, resolution=10, boundary=[-100,100])
 
 kde_clustered_x = kde(trj_clustered[1,:])
@@ -167,6 +169,13 @@ plt6 = Plots.heatmap(kde_clustered_yz.x, kde_clustered_yz.y, kde_clustered_yz.de
 Plots.plot(plt1, plt2, plt3, plt4, plt5, plt6, layout=(3, 2), size=(600, 600))
 
 ##
+############## OBSERVATIONS GENERATION ####################
+
+obs_trj = evolve([0.0, 0.0, 0.0], dt, 10000, F, sigma; timestepper=:rk4)
+obs_trj = (obs_trj .- M) ./ S
+score_trj = evolve([0.0, 0.0, 0.0], 0.1*dt, 100000, score_clustered_xt, sigma_I; timestepper=:rk4, resolution=10)
+
+##
 
 # Function to save all the data needed for the Lorenz63 plot
 function save_lorenz63_data(filename="data/GMM_data/lorenz63.h5")
@@ -179,8 +188,6 @@ function save_lorenz63_data(filename="data/GMM_data/lorenz63.h5")
         write(file, "dim", dim)
         write(file, "Nsteps", Nsteps)
         write(file, "Nc", Nc)
-        write(file, "pdf_min", pdf_min)
-        write(file, "pdf_max", pdf_max)
         
         # Write model parameters
         write(file, "M", M)
@@ -233,18 +240,18 @@ function save_lorenz63_data(filename="data/GMM_data/lorenz63.h5")
         write(file, "kde_clustered_yz_y", collect(kde_clustered_yz.y))
         write(file, "kde_clustered_yz_density", kde_clustered_yz.density)
         
-        # Write plot limits
-        write(file, "x_limits", collect(x_limits))
-        write(file, "y_limits", collect(y_limits))
-        write(file, "z_limits", collect(z_limits))
-        
         # Write small samples of trajectory data
-        write(file, "obs_sample", obs[:, 1:min(10000, size(obs, 2))])
-        write(file, "trj_clustered_sample", trj_clustered[:, 1:min(10000, size(trj_clustered, 2))])
+        write(file, "obs_trj", obs_trj)
+        write(file, "score_trj", score_trj)
     end
     
     println("Data saved to $filename")
 end
+
+# Run the save function
+save_lorenz63_data()
+
+##
 
 # Function to read the Lorenz63 data
 function read_lorenz63_data(filename="data/GMM_data/lorenz63.h5")
@@ -256,8 +263,6 @@ function read_lorenz63_data(filename="data/GMM_data/lorenz63.h5")
         data["dim"] = read(file, "dim")
         data["Nsteps"] = read(file, "Nsteps")
         data["Nc"] = read(file, "Nc")
-        data["pdf_min"] = read(file, "pdf_min")
-        data["pdf_max"] = read(file, "pdf_max")
         
         # Read model parameters
         data["M"] = read(file, "M")
@@ -310,32 +315,21 @@ function read_lorenz63_data(filename="data/GMM_data/lorenz63.h5")
         data["kde_clustered_yz_y"] = read(file, "kde_clustered_yz_y")
         data["kde_clustered_yz_density"] = read(file, "kde_clustered_yz_density")
         
-        # Read plot limits
-        data["x_limits"] = Tuple(read(file, "x_limits"))
-        data["y_limits"] = Tuple(read(file, "y_limits"))
-        data["z_limits"] = Tuple(read(file, "z_limits"))
-        
         # Read sample data
-        data["obs_sample"] = read(file, "obs_sample")
-        data["trj_clustered_sample"] = read(file, "trj_clustered_sample")
+        data["obs_trj"] = read(file, "obs_trj")
+        data["score_trj"] = read(file, "score_trj")
     end
     
     println("Data loaded from $filename")
     return data
 end
 
-# Run the save function
-save_lorenz63_data()
-
-##
 # Example of loading and using the data
 data = read_lorenz63_data()
 
 # Extract the necessary variables for plotting
 dt = data["dt"]
 dim = data["dim"]
-pdf_min = data["pdf_min"] 
-pdf_max = data["pdf_max"]
 
 # Extract KDE data
 kde_true_x_x = data["kde_true_x_x"]
@@ -374,95 +368,137 @@ kde_clustered_yz_x = data["kde_clustered_yz_x"]
 kde_clustered_yz_y = data["kde_clustered_yz_y"]
 kde_clustered_yz_density = data["kde_clustered_yz_density"]
 
-# Extract plot limits
-x_limits = data["x_limits"]
-y_limits = data["y_limits"]
-z_limits = data["z_limits"]
+# Extract trajectory data
+obs_trj = data["obs_trj"]
+score_trj = data["score_trj"]
 
 println("All data loaded and ready for plotting")
 
 ##
 
-using GLMakie
-using ColorSchemes
+# Create main figure with 4x3 layout (added one extra row)
+fig = GLMakie.Figure(size=(2250, 1800), fontsize=28)
 
-# Create main figure with 3x3 layout
-fig = GLMakie.Figure(size=(2000, 1500), fontsize=22)
+# Create layout for 4x3 grid
+grid = fig[1:4, 1:3] = GLMakie.GridLayout(4, 3)
 
-# Create layout for 3x3 grid
-grid = fig[1:3, 1:3] = GLMakie.GridLayout(3, 3)
+# Create time series plots in the top row
+ax_time_x = GLMakie.Axis(grid[1, 1],
+    xlabel="t", ylabel="x",
+    title="x Time Series",
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-# First column: Univariate PDFs
-ax_pdf_x = GLMakie.Axis(grid[1, 1],
+ax_time_y = GLMakie.Axis(grid[1, 2],
+    xlabel="t", ylabel="y",
+    title="y Time Series",
+    titlesize=36, xlabelsize=32, ylabelsize=32)
+
+ax_time_z = GLMakie.Axis(grid[1, 3],
+    xlabel="t", ylabel="z",
+    title="z Time Series",
+    titlesize=36, xlabelsize=32, ylabelsize=32)
+
+# First column: Univariate PDFs (now in row 2)
+ax_pdf_x = GLMakie.Axis(grid[2, 1],
     xlabel="x", ylabel="PDF",
     title="Univariate x PDF",
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-ax_pdf_y = GLMakie.Axis(grid[2, 1],
+ax_pdf_y = GLMakie.Axis(grid[3, 1],
     xlabel="y", ylabel="PDF", 
     title="Univariate y PDF",
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-ax_pdf_z = GLMakie.Axis(grid[3, 1],
+ax_pdf_z = GLMakie.Axis(grid[4, 1],
     xlabel="z", ylabel="PDF", 
     title="Univariate z PDF",
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
 # Second column: True Bivariate PDFs
-ax_true_xy = GLMakie.Axis(grid[1, 2],
+ax_true_xy = GLMakie.Axis(grid[2, 2],
     xlabel="x", ylabel="y",
     title="True (x,y) PDF",
-    aspect=GLMakie.DataAspect(),
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    # aspect=GLMakie.DataAspect(),
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-ax_true_xz = GLMakie.Axis(grid[2, 2],
+ax_true_xz = GLMakie.Axis(grid[3, 2],
     xlabel="x", ylabel="z",
     title="True (x,z) PDF",
-    aspect=GLMakie.DataAspect(),
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    # aspect=GLMakie.DataAspect(),
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-ax_true_yz = GLMakie.Axis(grid[3, 2],
+ax_true_yz = GLMakie.Axis(grid[4, 2],
     xlabel="y", ylabel="z",
     title="True (y,z) PDF",
-    aspect=GLMakie.DataAspect(),
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    # aspect=GLMakie.DataAspect(),
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
 # Third column: GMM Bivariate PDFs
-ax_gmm_xy = GLMakie.Axis(grid[1, 3],
+ax_gmm_xy = GLMakie.Axis(grid[2, 3],
     xlabel="x", ylabel="y",
-    title="GMM (x,y) PDF",
-    aspect=GLMakie.DataAspect(),
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    title="KGMM (x,y) PDF",
+    # aspect=GLMakie.DataAspect(),
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-ax_gmm_xz = GLMakie.Axis(grid[2, 3],
+ax_gmm_xz = GLMakie.Axis(grid[3, 3],
     xlabel="x", ylabel="z",
-    title="GMM (x,z) PDF",
-    aspect=GLMakie.DataAspect(),
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    title="KGMM (x,z) PDF",
+    # aspect=GLMakie.DataAspect(),
+    titlesize=36, xlabelsize=32, ylabelsize=32)
 
-ax_gmm_yz = GLMakie.Axis(grid[3, 3],
+ax_gmm_yz = GLMakie.Axis(grid[4, 3],
     xlabel="y", ylabel="z",
-    title="GMM (y,z) PDF",
-    aspect=GLMakie.DataAspect(),
-    titlesize=32, xlabelsize=28, ylabelsize=28)
+    title="KGMM (y,z) PDF",
+    # aspect=GLMakie.DataAspect(),
+    titlesize=36, xlabelsize=32, ylabelsize=32)
+
+# Plot time series data in the top row
+# Select subset of time points for clearer visualization
+n_time_points = min(1000, size(obs_trj, 2))
+time_points = collect(1:n_time_points) .* dt
+
+# X component time series
+GLMakie.lines!(ax_time_x, time_points, obs_trj[1, 1:n_time_points], 
+       color=:red, linewidth=1, label="Observed")
+GLMakie.lines!(ax_time_x, time_points, score_trj[1, 1:n_time_points], 
+       color=:blue, linewidth=1, label="Score")
+# GLMakie.axislegend(ax_time_x, position=:lt, labelsize=20)
+
+# Y component time series
+GLMakie.lines!(ax_time_y, time_points, obs_trj[2, 1:n_time_points], 
+       color=:red, linewidth=1)
+GLMakie.lines!(ax_time_y, time_points, score_trj[2, 1:n_time_points], 
+       color=:blue, linewidth=1)
+
+# Z component time series
+GLMakie.lines!(ax_time_z, time_points, obs_trj[3, 1:n_time_points], 
+       color=:red, linewidth=1)
+GLMakie.lines!(ax_time_z, time_points, score_trj[3, 1:n_time_points], 
+       color=:blue, linewidth=1)
+
+# Set the same time range for all time series plots
+time_xlims = (minimum(time_points), maximum(time_points))
+GLMakie.xlims!(ax_time_x, time_xlims)
+GLMakie.xlims!(ax_time_y, time_xlims)
+GLMakie.xlims!(ax_time_z, time_xlims)
 
 # Univariate PDFs - First column
 # Plot both true and GMM in the same axes with legends using read data
 GLMakie.lines!(ax_pdf_x, kde_true_x_x, kde_true_x_density, 
        color=:red, linewidth=2, label="True")
 GLMakie.lines!(ax_pdf_x, kde_clustered_x_x, kde_clustered_x_density, 
-       color=:blue, linewidth=2, label="GMM")
-GLMakie.axislegend(ax_pdf_x, position=:lt, labelsize=20)
+       color=:blue, linewidth=2, label="KGMM")
+GLMakie.axislegend(ax_pdf_x, position=:lt, labelsize=32)
 
 GLMakie.lines!(ax_pdf_y, kde_true_y_x, kde_true_y_density, 
        color=:red, linewidth=2, label="True")
 GLMakie.lines!(ax_pdf_y, kde_clustered_y_x, kde_clustered_y_density, 
-       color=:blue, linewidth=2, label="GMM")
+       color=:blue, linewidth=2, label="KGMM")
 
 GLMakie.lines!(ax_pdf_z, kde_true_z_x, kde_true_z_density, 
        color=:red, linewidth=2, label="True")
 GLMakie.lines!(ax_pdf_z, kde_clustered_z_x, kde_clustered_z_density, 
-       color=:blue, linewidth=2, label="GMM")
+       color=:blue, linewidth=2, label="KGMM")
 
 # Use pre-computed min/max values for color scaling
 # If not available in data, compute them from the density arrays
@@ -535,37 +571,36 @@ else
               max(maximum(kde_true_xz_y), maximum(kde_clustered_xz_y)))
 end
 
-# Apply limits to true and GMM plots
-GLMakie.xlims!(ax_true_xy, x_limits)
-GLMakie.ylims!(ax_true_xy, y_limits)
-GLMakie.xlims!(ax_gmm_xy, x_limits)
-GLMakie.ylims!(ax_gmm_xy, y_limits)
+# # Apply limits to true and GMM plots
+# GLMakie.xlims!(ax_true_xy, x_limits)
+# GLMakie.ylims!(ax_true_xy, y_limits)
+# GLMakie.xlims!(ax_gmm_xy, x_limits)
+# GLMakie.ylims!(ax_gmm_xy, y_limits)
 
-GLMakie.xlims!(ax_true_xz, x_limits)
-GLMakie.ylims!(ax_true_xz, z_limits)
-GLMakie.xlims!(ax_gmm_xz, x_limits)
-GLMakie.ylims!(ax_gmm_xz, z_limits)
+# GLMakie.xlims!(ax_true_xz, x_limits)
+# GLMakie.ylims!(ax_true_xz, z_limits)
+# GLMakie.xlims!(ax_gmm_xz, x_limits)
+# GLMakie.ylims!(ax_gmm_xz, z_limits)
 
-GLMakie.xlims!(ax_true_yz, y_limits)
-GLMakie.ylims!(ax_true_yz, z_limits)
-GLMakie.xlims!(ax_gmm_yz, y_limits)
-GLMakie.ylims!(ax_gmm_yz, z_limits)
+# GLMakie.xlims!(ax_true_yz, y_limits)
+# GLMakie.ylims!(ax_true_yz, z_limits)
+# GLMakie.xlims!(ax_gmm_yz, y_limits)
+# GLMakie.ylims!(ax_gmm_yz, z_limits)
 
 # Add a shared colorbar for all bivariate plots
-pdf_bar = GLMakie.Colorbar(fig[1:3, 4], 
+pdf_bar = GLMakie.Colorbar(fig[2:4, 4], 
               colormap=:viridis, 
               limits=(pdf_min, pdf_max),
-              label="Probability Density",
-              labelsize=28,
+              labelsize=32,
               vertical=true,
               width=30)
 
-# Adjust spacing
-GLMakie.colgap!(grid, 5)
-GLMakie.rowgap!(grid, 5)
+# # Adjust spacing
+# GLMakie.colgap!(grid, 5)
+# GLMakie.rowgap!(grid, 10)
 
 # Add a title
-GLMakie.Label(fig[0, 1:3], text="Lorenz63 Density Comparison", fontsize=36, font=:bold)
+GLMakie.Label(fig[0, 1:3], text="", fontsize=36, font=:bold)
 
 # Make sure the figures directory exists
 mkpath("figures/GMM_figures")
