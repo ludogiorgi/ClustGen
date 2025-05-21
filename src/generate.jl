@@ -64,7 +64,7 @@ function add_noise!(u, dt, σ::Matrix, dim)
 end
 
 """
-    evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false)
+    evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false, n_ens=1)
 
 Evolves a stochastic dynamical system forward in time.
 
@@ -78,91 +78,107 @@ Evolves a stochastic dynamical system forward in time.
 - `resolution`: Save results every `resolution` steps
 - `timestepper`: Integration method (`:rk4` or `:euler`)
 - `boundary`: If specified as [min, max], resets to u0 when state exceeds these bounds
+- `n_ens`: Number of ensemble members to generate (default: 1)
 
 # Returns
-- Matrix of results with shape (dim, Nsave+1) where Nsave = ceil(Nsteps/resolution)
+- Matrix of results with shape (dim, Nsave+1) if n_ens=1, or (dim, (Nsave+1)*n_ens) if n_ens>1
 """
-function evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false)
-    # Initialize state and storage
-    dim = length(u0)
-    Nsave = ceil(Int, Nsteps / resolution)
+function evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false, n_ens=1)
+    if n_ens == 1
+        # Initialize state and storage
+        dim = length(u0)
+        Nsave = ceil(Int, Nsteps / resolution)
 
-    u = copy(u0)
-    results = Matrix{Float64}(undef, dim, Nsave+1)  # Store results as (dim, Nsave)
-    results[:, 1] .= u0
+        u = copy(u0)
+        results = Matrix{Float64}(undef, dim, Nsave+1)  # Store results as (dim, Nsave)
+        results[:, 1] .= u0
 
-    # Set random seed for reproducibility
-    Random.seed!(seed)
+        # Set random seed for reproducibility
+        Random.seed!(seed)
 
-    # Select integration method
-    if timestepper == :rk4
-        timestepper = rk4_step!
-    elseif timestepper == :euler
-        timestepper = euler_step!
-    else
-        error("Invalid timestepper specified. Use :rk4 or :euler.")
-    end
-
-    # Initialize time tracking
-    t = 0.0
-    save_index = 1
-    
-    if boundary == false
-        # Standard evolution without boundary conditions
-        for step in 1:Nsteps
-            # Get diffusion coefficient at current state
-            sig = sigma(u, t)
-            
-            # Perform deterministic step
-            timestepper(u, dt, f, t)
-            
-            # Add stochastic component
-            add_noise!(u, dt, sig, dim)
-            
-            # Update time
-            t += dt
-            
-            # Save results at specified resolution
-            if step % resolution == 0
-                save_index += 1
-                results[:, save_index] .= u
-            end
+        # Select integration method
+        if timestepper == :rk4
+            timestepper = rk4_step!
+        elseif timestepper == :euler
+            timestepper = euler_step!
+        else
+            error("Invalid timestepper specified. Use :rk4 or :euler.")
         end
-    else
-        # Evolution with boundary conditions
-        count = 0
-        for step in 1:Nsteps
-            # Get diffusion coefficient at current state
-            sig = sigma(u, t)
-            
-            # Perform deterministic step
-            timestepper(u, dt, f, t)
-            
-            # Add stochastic component
-            add_noise!(u, dt, sig, dim)
-            
-            # Update time
-            t += dt
-            
-            # Reset if boundary is crossed
-            if any(u .< boundary[1]) || any(u .> boundary[2])
-                u .= u0
-                count += 1
+
+        # Initialize time tracking
+        t = 0.0
+        save_index = 1
+        
+        if boundary == false
+            # Standard evolution without boundary conditions
+            for step in 1:Nsteps
+                # Get diffusion coefficient at current state
+                sig = sigma(u, t)
+                
+                # Perform deterministic step
+                timestepper(u, dt, f, t)
+                
+                # Add stochastic component
+                add_noise!(u, dt, sig, dim)
+                
+                # Update time
+                t += dt
+                
+                # Save results at specified resolution
+                if step % resolution == 0
+                    save_index += 1
+                    results[:, save_index] .= u
+                end
             end
-            
-            # Save results at specified resolution
-            if step % resolution == 0
-                save_index += 1
-                results[:, save_index] .= u
+        else
+            # Evolution with boundary conditions
+            count = 0
+            for step in 1:Nsteps
+                # Get diffusion coefficient at current state
+                sig = sigma(u, t)
+                
+                # Perform deterministic step
+                timestepper(u, dt, f, t)
+                
+                # Add stochastic component
+                add_noise!(u, dt, sig, dim)
+                
+                # Update time
+                t += dt
+                
+                # Reset if boundary is crossed
+                if any(u .< boundary[1]) || any(u .> boundary[2])
+                    u .= u0
+                    count += 1
+                end
+                
+                # Save results at specified resolution
+                if step % resolution == 0
+                    save_index += 1
+                    results[:, save_index] .= u
+                end
             end
+            println("Percentage of boundary crossings: ", count/Nsteps)
         end
-        println("Percentage of boundary crossings: ", count/Nsteps)
+        return results
+    else
+        # Get ensemble results (axbxc array)
+        results = evolve_ens(u0, dt, Nsteps, f, sigma; seed=seed, resolution=resolution, timestepper=timestepper, boundary=boundary, n_ens=n_ens)
+        
+        # Reshape from (dim, timesteps, n_ens) to (dim, timesteps*n_ens)
+        dim, timesteps, ensembles = size(results)
+        reshaped = Array{Float64}(undef, dim, timesteps * ensembles)
+        
+        for i in 1:ensembles
+            reshaped[:, ((i-1)*timesteps+1):(i*timesteps)] = results[:, :, i]
+        end
+        
+        return reshaped
     end
-    return results
 end
 
 """
-    evolve(u0, dt, Nsteps, f, sigma1, sigma2; seed=123, resolution=1, timestepper=:rk4)
+    evolve(u0, dt, Nsteps, f, sigma1, sigma2; seed=123, resolution=1, timestepper=:rk4, n_ens=1)
 
 Evolves a stochastic dynamical system with two independent noise sources.
 
@@ -176,61 +192,77 @@ Evolves a stochastic dynamical system with two independent noise sources.
 - `seed`: Random seed for reproducibility
 - `resolution`: Save results every `resolution` steps
 - `timestepper`: Integration method (`:rk4` or `:euler`)
+- `n_ens`: Number of ensemble members to generate (default: 1)
 
 # Returns
-- Matrix of results with shape (dim, Nsave+1) where Nsave = ceil(Nsteps/resolution)
+- Matrix of results with shape (dim, Nsave+1) if n_ens=1, or (dim, (Nsave+1)*n_ens) if n_ens>1
 """
-function evolve(u0, dt, Nsteps, f, sigma1, sigma2; seed=123, resolution=1, timestepper=:rk4)
-    # Initialize state and storage
-    dim = length(u0)
-    Nsave = ceil(Int, Nsteps / resolution)
+function evolve(u0, dt, Nsteps, f, sigma1, sigma2; seed=123, resolution=1, timestepper=:rk4, n_ens=1)
+    if n_ens == 1
+        # Initialize state and storage
+        dim = length(u0)
+        Nsave = ceil(Int, Nsteps / resolution)
 
-    u = copy(u0)
-    results = Matrix{Float64}(undef, dim, Nsave+1)  # Store results as (dim, Nsave)
-    results[:, 1] .= u0
+        u = copy(u0)
+        results = Matrix{Float64}(undef, dim, Nsave+1)  # Store results as (dim, Nsave)
+        results[:, 1] .= u0
 
-    # Set random seed for reproducibility
-    Random.seed!(seed)
+        # Set random seed for reproducibility
+        Random.seed!(seed)
 
-    # Select integration method
-    if timestepper == :rk4
-        timestepper = rk4_step!
-    elseif timestepper == :euler
-        timestepper = euler_step!
-    else
-        error("Invalid timestepper specified. Use :rk4 or :euler.")
-    end
-
-    # Initialize time tracking
-    t = 0.0
-    save_index = 1
-    
-    for step in 1:Nsteps
-        # Get diffusion coefficients at current state
-        sig1 = sigma1(u, t)
-        sig2 = sigma2(u, t)
-        
-        # Perform deterministic step
-        timestepper(u, dt, f, t)
-        
-        # Add stochastic components from both noise sources
-        add_noise!(u, dt, sig1, dim)
-        add_noise!(u, dt, sig2, dim)
-        
-        # Update time
-        t += dt
-        
-        # Save results at specified resolution
-        if (step-1) % resolution == 0
-            save_index += 1
-            results[:, save_index] .= u
+        # Select integration method
+        if timestepper == :rk4
+            timestepper = rk4_step!
+        elseif timestepper == :euler
+            timestepper = euler_step!
+        else
+            error("Invalid timestepper specified. Use :rk4 or :euler.")
         end
+
+        # Initialize time tracking
+        t = 0.0
+        save_index = 1
+        
+        for step in 1:Nsteps
+            # Get diffusion coefficients at current state
+            sig1 = sigma1(u, t)
+            sig2 = sigma2(u, t)
+            
+            # Perform deterministic step
+            timestepper(u, dt, f, t)
+            
+            # Add stochastic components from both noise sources
+            add_noise!(u, dt, sig1, dim)
+            add_noise!(u, dt, sig2, dim)
+            
+            # Update time
+            t += dt
+            
+            # Save results at specified resolution
+            if (step-1) % resolution == 0
+                save_index += 1
+                results[:, save_index] .= u
+            end
+        end
+        return results
+    else
+        # Get ensemble results (axbxc array)
+        results = evolve_ens(u0, dt, Nsteps, f, sigma1, sigma2; seed=seed, resolution=resolution, timestepper=timestepper, n_ens=n_ens)
+        
+        # Reshape from (dim, timesteps, n_ens) to (dim, timesteps*n_ens)
+        dim, timesteps, ensembles = size(results)
+        reshaped = Array{Float64}(undef, dim, timesteps * ensembles)
+        
+        for i in 1:ensembles
+            reshaped[:, ((i-1)*timesteps+1):(i*timesteps)] = results[:, :, i]
+        end
+        
+        return reshaped
     end
-    return results
 end
 
 """
-    evolve(u0, dt, Nsteps, f; resolution=1)
+    evolve(u0, dt, Nsteps, f; resolution=1, n_ens=1)
 
 Evolves a deterministic dynamical system (no noise).
 
@@ -240,13 +272,29 @@ Evolves a deterministic dynamical system (no noise).
 - `Nsteps`: Total number of steps to evolve
 - `f`: Deterministic drift function f(u, t)
 - `resolution`: Save results every `resolution` steps
+- `n_ens`: Number of ensemble members to generate (default: 1)
 
 # Returns
-- Matrix of results with shape (dim, Nsave+1) where Nsave = ceil(Nsteps/resolution)
+- Matrix of results with shape (dim, Nsave+1) if n_ens=1, or (dim, (Nsave+1)*n_ens) if n_ens>1
 """
-evolve(u0, dt, Nsteps, f; resolution=1) = evolve(u0, dt, Nsteps, f, 0.0; resolution=resolution)
-
-
+function evolve(u0, dt, Nsteps, f; resolution=1, n_ens=1)
+    if n_ens == 1
+        return evolve(u0, dt, Nsteps, f, 0.0; resolution=resolution)
+    else
+        # Get ensemble results (axbxc array)
+        results = evolve_ens(u0, dt, Nsteps, f; resolution=resolution, n_ens=n_ens)
+        
+        # Reshape from (dim, timesteps, n_ens) to (dim, timesteps*n_ens)
+        dim, timesteps, ensembles = size(results)
+        reshaped = Array{Float64}(undef, dim, timesteps * ensembles)
+        
+        for i in 1:ensembles
+            reshaped[:, ((i-1)*timesteps+1):(i*timesteps)] = results[:, :, i]
+        end
+        
+        return reshaped
+    end
+end
 
 """
     evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false, n_ens=1)
@@ -480,8 +528,9 @@ Evolves a deterministic dynamical system (no noise), optionally generating an en
 - Array of results with shape (dim, Nsave+1, n_ens) where Nsave = ceil(Nsteps/resolution)
 """
 function evolve_ens(u0, dt, Nsteps, f; resolution=1, n_ens=1)
-    # For deterministic systems, compute a single trajectory and replicate
-    trajectory = evolve_ens(u0, dt, Nsteps, f, 0.0; resolution=resolution, n_ens=n_ens)
+    # For deterministic systems, compute a single trajectory 
+    # Use n_ens=1 to avoid generating multiple identical trajectories
+    trajectory = evolve_ens(u0, dt, Nsteps, f, 0.0; resolution=resolution, n_ens=1)
     
     # If only one ensemble member requested, return as is
     if n_ens == 1

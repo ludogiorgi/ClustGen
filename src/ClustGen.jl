@@ -54,7 +54,7 @@ include("KSE_integrate.jl")     # KSE integration functions
 export apply_autoencoder, read_autoencoder
 
 # Clustering and preprocessing
-export f_tilde, f_tilde_ssp, generate_inputs_targets
+export f_tilde, f_tilde_ssp, f_tilde_labels, generate_inputs_targets
 
 # Model training
 export train, check_loss

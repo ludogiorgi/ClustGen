@@ -2,7 +2,7 @@ using Pkg
 Pkg.activate(".")
 Pkg.instantiate()
 
-
+using Plots
 using Revise
 using MarkovChainHammer
 using ClustGen
@@ -33,17 +33,23 @@ function sigma(x, t; noise = 1/√2)
     return [sigma1, sigma2, sigma3, sigma4]
 end
 
+function score_true(x)
+    u = x[1]
+    s = sigma_eff * (σ / ε)
+    return [2 * (u * (1-u^2)) / (s^2)]
+end
+
 dim = 1
 dt = 0.01
 ε = 0.5
-σ = 0.16 * ε
-Nsteps = 1000000
+σ = 0.08
+Nsteps = 1000000000
 f = (x, t) -> F(x, t, σ, ε)
-obs = evolve(randn(4), dt, Nsteps, f, sigma; timestepper=:rk4, resolution=1)
+obs = evolve(randn(4), dt, Nsteps, f, sigma; timestepper=:rk4, resolution=100)
 
-autocov_obs = zeros(dim, 300)
+autocov_obs = zeros(dim, 1000)
 for i in 1:dim
-    autocov_obs[i,:] = autocovariance(obs[i,:]; timesteps=300)
+    autocov_obs[i,:] = autocovariance(obs[i,1:1000000]; timesteps=1000)
 end
 
 std(obs[3,:])
@@ -60,7 +66,6 @@ Plots.plot(plt1, plt2, layout=(2, 1), size=(800, 800))
 obs_uncorr = obs[1:1, 1:1:end]
 
 Plots.scatter(obs_uncorr[1,1:10000], markersize=2, label="", xlabel="X", ylabel="Y", title="Observed Trajectory")
-
 
 ##
 ############################ CLUSTERING ####################
@@ -85,16 +90,13 @@ end
 centers_sorted_indices = sortperm(centers[1,:])
 centers_sorted = centers[:,centers_sorted_indices][:]
 scores = .- averages[:,centers_sorted_indices][:] ./ σ_value
-scores_true = [ score_true(centers_sorted[i])[1] for i in eachindex(centers_sorted)]
+# scores_true = [ score_true(centers_sorted[i])[1] for i in eachindex(centers_sorted)]
 
 Plots.plot(centers_sorted[:], scores[:], label="Learned", xlabel="X", ylabel="Force", title="Forces", xlims=(-1.3, 1.3), ylims=(-5, 5))
-Plots.plot!(centers_sorted[:], scores_true, label="True", xlabel="X", ylabel="Force", title="Forces")
+# Plots.plot!(centers_sorted[:], scores_true, label="True", xlabel="X", ylabel="Force", title="Forces")
 
 ##
 #################### TRAINING WITH CLUSTERING LOSS ####################
-inputs_targets = generate_inputs_targets(averages, centers, Nc; normalization=false)
-normalization = false
-σ_value = 0.05
 
 @time nn_clustered, loss_clustered = train(inputs_targets, 5000, 16, [dim, 50, 25, dim]; use_gpu=true, activation=swish, last_activation=identity)
 if normalization == true
@@ -109,33 +111,28 @@ Plots.plot(loss_clustered)
 ##
 #################### VECTOR FIELDS ####################
 
-function score_true(x)
-    u = x[1]
-    s = sigma_eff * (σ / ε)
-    return [2 * (u * (1-u^2)) / (s^2)]
-end
-
 xax = [-1.25:0.005:1.25...]
 
-s_true = [score_true_norm(xax[i])[1] for i in eachindex(xax)]
+# s_true = [score_true_norm(xax[i])[1] for i in eachindex(xax)]
 s_gen = [score_clustered(xax[i])[1] for i in eachindex(xax)]
 
 Plots.scatter(centers_sorted, scores, color=:blue, alpha=0.2, label="Cluster centers", xlims=(-1.3, 1.3), ylims=(-5, 5))
-Plots.plot!(xax, s_true, label="True", xlabel="X", ylabel="Force", title="Forces", lw=3)
+# Plots.plot!(xax, s_true, label="True", xlabel="X", ylabel="Force", title="Forces", lw=3)
 Plots.plot!(xax, s_gen, label="Learned", lw=3)
 
+##
+xax = [-1.6:0.02:1.6...]
+
+pdf_kgmm = compute_density_from_score(xax, score_clustered)
+
+Plots.plot(xax, pdf_kgmm, label="Learned", xlabel="x", ylabel="Density", title="PDFs", lw=3, legend=:bottomright)
+Plots.plot!(kde_obs.x, kde_obs.density, label="Observed",lw=3)
 
 ##
 plotly()
 xax2 = [0:dt:50*dt...]
 
-
 C = autocovariance(obs[3,:], timesteps=51)
+sigma_eff = sqrt(2*sum(C[2:end]) * dt)
 
 Plots.plot(xax2, C, label="X", xlabel="Lag", ylabel="Autocovariance", title="Autocovariance of Observed Trajectory")
-Plots.plot!(xax2, var(obs[3,:]) .* exp.(-xax2/0.05))
-##
-
-
-sigma_eff = sqrt(2*sum(C[2:end]) * dt)
-sigma_eff = sqrt(2*var(obs[3,:])*0.06)

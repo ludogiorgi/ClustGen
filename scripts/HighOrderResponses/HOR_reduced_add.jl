@@ -388,7 +388,7 @@ fig = Figure(resolution=(1800, 600), font="CMU Serif", fontsize=24)
 
 # Define common elements
 colors = [:blue, :black, :red]
-labels = ["True", "Linear", "KGMM"]
+labels = ["Analytical", "Linear", "KGMM"]
 time_axis = 0:dt*res_trj:n_tau*dt*res_trj
 
 # Create axes array - 5 columns (PDF + 4 moments)
@@ -435,14 +435,13 @@ axes[1] = Axis(fig[1,1],
 )
 
 # Get the KDE data
-
 # Create Gaussian PDF with same x range as the true data
 pdf_gauss = Distributions.pdf.(Normal(0, 1), xax)
 
-# Plot PDF
-lines!(axes[1], xax, pdf_obs, color=colors[1], linewidth=3)
-lines!(axes[1], xax, pdf_gauss, color=colors[2], linewidth=3)
-lines!(axes[1], xax, pdf_kgmm, color=colors[3], linewidth=3)
+# Plot PDF with transparency
+lines!(axes[1], xax, pdf_obs, color=(colors[1], 0.5), linewidth=3)
+lines!(axes[1], xax, pdf_gauss, color=(colors[2], 1.0), linewidth=3)
+lines!(axes[1], xax, pdf_kgmm, color=(colors[3], 0.5), linewidth=3)
 
 # Response function plots (columns 2-5)
 for j in 1:4
@@ -459,10 +458,10 @@ for j in 1:4
         limits = (nothing, (y_limits[j, 1], y_limits[j, 2]))
     )
 
-    # Plot response data
-    lines!(axes[response_col], time_axis, R_true[j,1,:] , color=colors[1], linewidth=3)
-    lines!(axes[response_col], time_axis, R_lin[j,1,:], color=colors[2], linewidth=3)
-    lines!(axes[response_col], time_axis, R_gen_c[j,1,:], color=colors[3], linewidth=3)
+    # Plot response data with transparency
+    lines!(axes[response_col], time_axis, R_true[j,1,:], color=(colors[1], 0.5), linewidth=3)
+    lines!(axes[response_col], time_axis, R_lin[j,1,:], color=(colors[2], 1.0), linewidth=3)
+    lines!(axes[response_col], time_axis, R_gen_c[j,1,:], color=(colors[3], 0.5), linewidth=3)
     
     # Add grid lines for readability
     axes[response_col].xgridvisible = true
@@ -471,7 +470,7 @@ end
 
 # Add unified legend at the bottom
 Legend(fig[2, :],
-    [LineElement(color=c, linewidth=3, linestyle=:solid)
+    [LineElement(color=(c, 1.0), linewidth=3, linestyle=:solid)
      for c in colors],
     labels,
     "Methods",
@@ -487,7 +486,7 @@ rowgap!(fig.layout, 20)
 fig.layout[3, :] = GridLayout(height=20)
 
 # Save figure
-# save("figures/HOR_figures/reduced_responses.png", fig, px_per_unit=2)  # Higher DPI for better print quality
+save("figures/HOR_figures/reduced_responses.png", fig, px_per_unit=2)  # Higher DPI for better print quality
 
 fig
 
@@ -507,7 +506,7 @@ pdf_titles = ["ϵ=0.06", "ϵ=0.08", "ϵ=0.1", "ϵ=0.12"]
 colors = [:blue, :black, :red, :green]  # Perturbed, Linear, KGMM, True
 linestyles = [:solid, :solid, :solid, :solid]  # All solid lines
 linewidths = [linewidth, linewidth, linewidth, linewidth]  # Same width for all
-labels = ["True", "Linear", "KGMM", "Perturbed"]
+labels = ["Analytic", "Linear", "KGMM", "Perturbed"]
 
 # ---------- TOP ROW: MOMENT PLOTS ----------
 axes = Matrix{Axis}(undef, 2, 4)
@@ -525,9 +524,9 @@ for i in 1:4
     )
     
     # Plot moment data
-    lines!(axes[1, i], ϵ_vals, moments_true[:, i], color=colors[1], linewidth=linewidths[4], linestyle=linestyles[4])
+    lines!(axes[1, i], ϵ_vals, moments_true[:, i], color=(colors[1], 0.5), linewidth=linewidths[4], linestyle=linestyles[4])
     lines!(axes[1, i], ϵ_vals, moments_lin[:, i], color=colors[2], linewidth=linewidths[2], linestyle=linestyles[2])
-    lines!(axes[1, i], ϵ_vals, moments_gen[:, i], color=colors[3], linewidth=linewidths[3], linestyle=linestyles[3])
+    lines!(axes[1, i], ϵ_vals, moments_gen[:, i], color=(colors[3], 0.5), linewidth=linewidths[3], linestyle=linestyles[3])
     lines!(axes[1, i], ϵ_vals, moments_pert[:, i], color=colors[4], linewidth=linewidths[1], linestyle=linestyles[1])
     
     
@@ -551,12 +550,16 @@ for i in 1:4
     )
     
     # Plot PDF data
-    lines!(axes[2, i], xax, pdf_true[i], color=colors[1], linewidth=linewidths[4], linestyle=linestyles[4])
+    lines!(axes[2, i], xax, pdf_true[i], color=(colors[1], 0.5), linewidth=linewidths[4], linestyle=linestyles[4])
     if i < 4  # The last plot doesn't have linear data
         lines!(axes[2, i], xax, pdf_lin[i], color=colors[2], linewidth=linewidths[2], linestyle=linestyles[2])
     end
-    lines!(axes[2, i], xax, pdf_gen[i], color=colors[3], linewidth=linewidths[3], linestyle=linestyles[3])
-    lines!(axes[2, i], xax, pdf_pert[i], color=colors[4], linewidth=linewidths[1], linestyle=linestyles[1])
+    lines!(axes[2, i], xax, pdf_gen[i], color=(colors[3], 0.5), linewidth=linewidths[3], linestyle=linestyles[3])
+    if i == 1
+        lines!(axes[2, i], xax, pdf_pert[i], color=(colors[4], 0.5), linewidth=linewidths[4], linestyle=linestyles[4])
+    else
+        lines!(axes[2, i], xax, pdf_pert[i], color=colors[4], linewidth=linewidths[4], linestyle=linestyles[4])
+    end
     # Add unperturbed distribution for reference (using a dashed green line)
     lines!(axes[2, i], xax, pdf_unpert, color=:green, linewidth=linewidth-1, linestyle=:dash)
     
@@ -575,7 +578,7 @@ Legend(fig[3, 1:4],
     [LineElement(color=c, linewidth=lw, linestyle=ls) 
      for (c, lw, ls) in zip(colors, linewidths, linestyles)] 
     ∪ [LineElement(color=:green, linewidth=linewidth-1, linestyle=:dash)],
-    ["True", "Linear", "KGMM", "Perturbed", "Unperturbed"],
+    ["Analytic", "Linear", "KGMM", "Perturbed", "Unperturbed"],
     "Methods",
     orientation = :horizontal,
     titlesize = 32,
@@ -706,18 +709,3 @@ pdf_pert = [results["pdf_pert"][:,i] for i in 1:size(results["pdf_pert"], 2)]
 pdf_true = [results["pdf_true"][:,i] for i in 1:size(results["pdf_true"], 2)]
 pdf_gen = [results["pdf_gen"][:,i] for i in 1:size(results["pdf_gen"], 2)]
 pdf_lin = [results["pdf_lin"][:,i] for i in 1:size(results["pdf_lin"], 2)]
-
-
-centers
-
-##
-
-a = 2
-b = 4
-a+b
-
-xax = [0:0.05:1...]
-
-Plots.plot(xax, 2 .* xax)
-
-##

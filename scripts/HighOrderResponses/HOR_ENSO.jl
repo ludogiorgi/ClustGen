@@ -266,7 +266,7 @@ fig = Figure(resolution=(1800, 1000), font="CMU Serif", fontsize=24)
 
 # Define common elements - update colors to match your previous plots
 colors = [:blue, :black, :red]  # True/Numerical, Linear, KGMM/Generative
-labels = ["True", "Linear", "KGMM"]
+labels = ["Numerical", "Linear", "KGMM"]
 time_axis = 0:10*dt*res_trj:n_tau*10*dt*res_trj
 
 # Create axes array - 5 columns (PDFs + 4 moments)
@@ -362,8 +362,8 @@ for i in 1:3
             xlabelsize = 28,
             ylabelsize = 28,
             xticklabelsize = 24,
-            yticklabelsize = 24,
-            limits = (nothing, (y_limits[j, 1], y_limits[j, 2]))
+            yticklabelsize = 24
+            #limits = (nothing, (y_limits[j, 1], y_limits[j, 2]))
         )
 
         # Plot numerical response data (normalize higher moments)
@@ -515,5 +515,3 @@ Nc = results["Nc"]
 dt = results["dt"]
 res_trj = results["res_trj"]
 n_tau = results["n_tau"]
-
-centers
