@@ -177,9 +177,11 @@ end
 C0 = centers * (centers * Diagonal(P_steady))'
 C1_Q = centers * Q * (centers * Diagonal(P_steady))'
 C1_grad = gradLogp * (centers * Diagonal(P_steady))'
-Σ_test = sqrt(C1_Q * inv(C1_grad))[1]
+Σ_test2 = C1_Q * inv(C1_grad)
+Σ_test = cholesky(0.5*(Σ_test2 .+ Σ_test2')).L[1,1]
 println("Σ_test = ", Σ_test)
 
+Σ_test = computeSigma(centers, P_steady, Q, gradLogp)
 ##
 #################### SAMPLES GENERATION ####################
 
