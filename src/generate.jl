@@ -109,7 +109,7 @@ function evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:r
     
     if boundary == false
         # Standard evolution without boundary conditions
-        for step in 1:Nsteps
+        for step in ProgressBar(1:Nsteps)
             # Get diffusion coefficient at current state
             sig = sigma(u, t)
             
@@ -118,6 +118,12 @@ function evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:r
             
             # Add stochastic component
             add_noise!(u, dt, sig, dim)
+
+            # 🛑 Check for divergence
+            if any(isnan.(u)) || any(abs.(u) .> 1e5)
+                @warn "🚨 Divergenza a step $step: u = $u"
+                break
+            end
             
             # Update time
             t += dt
@@ -131,7 +137,7 @@ function evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:r
     else
         # Evolution with boundary conditions
         count = 0
-        for step in 1:Nsteps
+        for step in ProgressBar(1:Nsteps)
             # Get diffusion coefficient at current state
             sig = sigma(u, t)
             

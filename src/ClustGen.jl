@@ -6,7 +6,7 @@ This package provides tools for analyzing, clustering, and generating trajectori
 from dynamical systems using various machine learning and statistical techniques.
 """
 module ClustGen
-
+__precompile__(false)
 # Core dependencies
 using StateSpacePartitions
 using LinearAlgebra
@@ -54,7 +54,7 @@ include("KSE_integrate.jl")     # KSE integration functions
 export apply_autoencoder, read_autoencoder
 
 # Clustering and preprocessing
-export f_tilde, f_tilde_ssp, generate_inputs_targets
+export f_tilde, f_tilde_ssp, generate_inputs_targets, f_tilde_labels
 
 # Model training
 export train, check_loss
