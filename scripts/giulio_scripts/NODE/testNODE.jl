@@ -8,13 +8,11 @@ using ClustGen
 using KernelDensity
 using HDF5
 using BSON
+using BSON: @save
 using Plots
 using LinearAlgebra
 using Distributions
 using DifferentialEquations
-using Zygote
-using CUDA
-using SciMLSensitivity
 using Flux
 using OrdinaryDiffEq
 using Random
@@ -22,8 +20,7 @@ using Statistics
 using StatsBase
 using ProgressBars
 using Optimisers
-using ComponentArrays
-
+using SciMLSensitivity
 #==================== LORENZ SYSTEM ====================#
 function F(x, t, ε ; µ=10.0, ρ=28.0, β=8/3)
     dy1 = µ/ε^2 * (x[2] - x[1])
@@ -103,7 +100,7 @@ end
 # 1. Model definition
 # ------------------------
 
-m = 10  # delay embedding dim
+m = 14  # delay embedding dim
 layers = [m, 256, 256, m]
 activation_hidden = swish
 activation_output = identity
@@ -117,7 +114,7 @@ flat_p0, re = Flux.destructure(model)
 # ------------------------
 
 dt = 0.001f0
-n_steps = 25
+n_steps = 45
 t = collect(0.0f0:dt:dt*(n_steps - 1))
 tspan = (t[1], t[end])
 Nsteps = 1000000
@@ -172,6 +169,10 @@ state = Optimisers.setup(opt, p)
 n_epochs = 500
 losses = []
 
+using BSON: @save
+save_every = 100  # Salva ogni 100 epoche
+
+
 for epoch in ProgressBar(1:n_epochs)
     u = data_sample[rand(1:end)]
     loss_val, back = Flux.withgradient(p) do p
@@ -179,7 +180,12 @@ for epoch in ProgressBar(1:n_epochs)
     end
     state, p = Optimisers.update(state, p, back[1])
     push!(losses, loss_val)
+
+    if epoch % save_every == 0
+        @save "model_epoch_$(epoch).bson" p
+    end
 end
+
 
 println("Final Loss: ", losses[end])
 plotlyjs()
@@ -225,6 +231,7 @@ y_pred_long = pred_long[1, 1:max_steps]
 y_true_long = Z[1, 1:max_steps]
 t_plot = t_long[1:max_steps]
 
+
 #Plot of the time series
 plotlyjs()
 plt2 = plot(t_plot, y_true_long, label="True y2(t)", lw=2)
@@ -237,6 +244,7 @@ kde_obs = kde(y_true_long)
 plot_kde = plot(kde_pred.x, kde_pred.density; label = "prediction", color = :red)
 plot!(plot_kde, kde_obs.x, kde_obs.density; label = "observations", color = :blue)
 display(plot_kde)
+
 
 #=============== END MAIN ===============#
 

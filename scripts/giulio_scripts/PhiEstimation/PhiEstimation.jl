@@ -56,34 +56,43 @@ dim = 4 # Number of dimensions in the system
 dt = 0.01
 Nsteps = 100000000
 f(x, t) = F(x, t, σ, ε)
-obs_nn = evolve(randn(4), dt, Nsteps, f, sigma; timestepper=:rk4, resolution=100)
-obs_uncorr = obs_nn[1:1, 1:1:end]
+obs_nn = evolve(randn(4), dt, Nsteps, f, sigma; timestepper=:rk4, resolution=10)
+#obs_uncorr = obs_nn[1:1, 1:1:end]
 
 ########## 2. Normalize and autocovariance ##########
-M = mean(obs_nn, dims=2)
-S = std(obs_nn, dims=2)
-obs = (obs_nn .- M) ./ S
+M = mean(obs_nn, dims=2)[1]
+S = std(obs_nn, dims=2)[1]
+obs = (obs_nn[1:1,:] .- M) ./ S
 
-autocov_obs = zeros(4, 100)
+autocov_obs = autocovariance(obs[1, 1:100000]; timesteps=500)
+kde_obs = kde(obs[1, :])
+
+autocov_obs_nn = zeros(4, 100)
+
 for i in 1:4
-    autocov_obs[i, :] = autocovariance(obs_nn[i, :]; timesteps=100)
+    autocov_obs_nn[i, :] = autocovariance(obs_nn[i, :]; timesteps=100)
 end
 
-D_eff = dt * (0.5 * autocov_obs[3, 1] + sum(autocov_obs[3, 2:end-1]) + 0.5 * autocov_obs[3, end])
+D_eff = dt * (0.5 * autocov_obs_nn[3, 1] + sum(autocov_obs_nn[3, 2:end-1]) + 0.5 * autocov_obs_nn[3, end])
 D_eff = 0.3
 @show D_eff
 
+# plt_12 = plot(autocov_obs_nn[1,:], label="X", xlabel="Lag", ylabel="Autocovariance", title="Autocovariance of x")
+
 #compute tau from autocovariance 
-function estimate_tau(y, dt; threshold=0.2)
-    y_centered = y .- mean(y)
-    acf = autocor(y_centered)
-    for i in 2:length(acf)
-        if abs(acf[i]) < threshold
-            return (i - 1) * dt, acf
-        end
-    end
-    return (length(acf) - 1) * dt, acf
-end
+# function estimate_tau(y, dt; threshold=0.2)
+#     y_centered = y .- mean(y)
+#     acf = autocor(y_centered)
+#     for i in 2:length(acf)
+#         if abs(acf[i]) < threshold
+#             return (i - 1) * dt, acf
+#         end
+#     end
+#     return (length(acf) - 1) * dt, acf
+# end
+# # Applichiamolo alla terza variabile (y₂)
+# τ_y2, acf_y2 = estimate_tau(obs_nn[3, :], dt)
+
 
 #training and clustering parameters 
 σ_value=0.05
@@ -92,18 +101,19 @@ conv_param=0.02
 n_epochs=5000
 batch_size=16
 
-# Applichiamolo alla terza variabile (y₂)
-τ_y2, acf_y2 = estimate_tau(obs_nn[3, :], dt)
-
 
 ########## 3. Clustering ##########
-averages, centers, Nc, labels = f_tilde_labels(σ_value, obs_uncorr; prob=prob, do_print=false, conv_param=conv_param, normalization=false)
+averages, centers, Nc, labels = f_tilde_labels(σ_value, obs[:,1:10:end]; prob=prob, do_print=false, conv_param=conv_param, normalization=false)
 inputs_targets = generate_inputs_targets(averages, centers, Nc; normalization=false)
 
 ########## 4. Score Functions ##########
+
+#analytic score function
 f1(x,t) = x .- x.^3
 score_true(x, t) = normalize_f(f1, x, t, M, S)
-kde_x = kde(obs_nn[1, 200:end])
+
+#learned score function
+#kde_x = kde(obs_nn[1, :])
 centers_sorted_indices = sortperm(centers[1, :])
 centers_sorted = centers[:, centers_sorted_indices][:]
 scores = .- averages[:, centers_sorted_indices][:] ./ σ_value
@@ -114,15 +124,7 @@ scores = .- averages[:, centers_sorted_indices][:] ./ σ_value
     use_gpu=false)
 
 nn_clustered_cpu = nn |> cpu
-# score_clustered(x) = begin
-#     if abs(x[1]) > 3.0
-#         return [0.0]  # fallback neutro
-#     else
-#         return .- nn_clustered_cpu(reshape(Float32[x...], :, 1))[:] ./ σ_value
-#     end
-# end
 score_clustered(x) = .- nn_clustered_cpu(reshape(Float32[x...], :, 1))[:] ./ σ_value
-
 
 ########## 6. Compute PDF ##########
 function true_pdf_normalized(x)
@@ -142,48 +144,43 @@ scale_factor = maximum(kde_x.density) / maximum(pdf_true)
 pdf_true .*= scale_factor
 
 ########## 6b. Compare y2 distribution with Gaussian ##########
-y2_samples = obs_nn[3, 200:end]
-kde_y2 = kde(y2_samples)
-μ_y2 = mean(y2_samples)
-σ_y2 = std(y2_samples)
-gauss_y2(x) = pdf(Normal(μ_y2, σ_y2), x)
-xax_y2 = kde_y2.x
-dx = xax_y2[2] - xax_y2[1]
-pdf_kde = kde_y2.density ./ (sum(kde_y2.density) * dx)
-pdf_gaussian_y2 = [gauss_y2(x) for x in xax_y2]
-pdf_gaussian_y2 ./= sum(pdf_gaussian_y2) * dx
+# y2_samples = obs_nn[3, 200:end] #occhio a 200:end qui
+# kde_y2 = kde(y2_samples)
+# μ_y2 = mean(y2_samples)
+# σ_y2 = std(y2_samples)
+# gauss_y2(x) = pdf(Normal(μ_y2, σ_y2), x)
+# xax_y2 = kde_y2.x
+# dx = xax_y2[2] - xax_y2[1]
+# pdf_kde = kde_y2.density ./ (sum(kde_y2.density) * dx)
+# pdf_gaussian_y2 = [gauss_y2(x) for x in xax_y2]
+# pdf_gaussian_y2 ./= sum(pdf_gaussian_y2) * dx
 
 
-########## 6c. Compute ACF from Langvein equation dx = s(x) +  \sqrt(2)ξ(t) ##########
-score_only_xt(x, t) = score_clustered(x)
-sigma_plain(x, t) = [sqrt(2.0);;]  
+########## 6c. Compute ACF from Langvein equation dx = s(x) +  \sqrt(2)ξ(t) without Phi ##########
+# score_only_xt(x, t) = score_clustered(x)
+# sigma_plain(x, t) = [sqrt(2.0);;]  
 
-trj_score_only = evolve([0.0], dt, Nsamples, score_only_xt, sigma_plain;
-                        timestepper=:euler, resolution=1)
-auto_score_only = autocovariance(trj_score_only[1, 1:res:end]; timesteps=tsteps)
+# trj_score_only = evolve([0.0], dt, Nsamples, score_only_xt, sigma_plain;
+#                         timestepper=:euler, resolution=1)
+# auto_score_only = autocovariance(trj_score_only[1, 1:res:end]; timesteps=tsteps)
 
 
 ########## Phi calculation ##########
-
+dt = 0.1
 #rate matrix
-Q = generator(labels; dt=dt)
+Q = generator(labels; dt=dt)*0.16
 P_steady = steady_state(Q)
 
 #test if Q approximates well the dynamics
 tsteps = 51
 res = 10
 
-auto_obs = zeros(dim, tsteps)
-auto_Q = zeros(dim, tsteps)
-
-for i in 1:dim
-    auto_obs[i,:] = autocovariance(obs[i,1:res:end]; timesteps=tsteps) 
-    auto_Q[i,:] = autocovariance(centers[1,:], Q, [0:dt*res:Int(res * (tsteps-1) * dt)...])
-end
+auto_obs = autocovariance(obs[1:res:end]; timesteps=tsteps) 
+auto_Q = autocovariance(centers[1,:], Q, [0:dt*res:Int(res * (tsteps-1) * dt)...])
 
 
-plt = Plots.plot(auto_obs[1,:])
-plt = Plots.plot!(auto_Q[1,:])
+plt = Plots.plot(auto_obs)
+plt = Plots.plot!(auto_Q)
 
 #compute the score function
 gradLogp = - averages ./ σ_value
@@ -192,12 +189,8 @@ gradLogp = - averages ./ σ_value
 #compute Phi and Σ
 M_Q = centers * Q * (centers *Diagonal(P_steady))'
 V_Q = gradLogp * (centers * Diagonal(P_steady))'
-Φ = M_Q * inv(V_Q)
-@show norm(Φ)
-@show cond(Φ)
-@show maximum(abs, Φ)
-
-Σ = sqrt((Φ))
+Φ = (M_Q * inv(V_Q))[1,1]
+Σ = sqrt(Φ)
 
 
 ########## Test effective dynamics ##########
@@ -228,20 +221,80 @@ sigma_Langevin(x, t) = Σ
 Nsamples = 10000000
 dt = 0.001
 trj_langevin = evolve([0.0], dt, Nsamples, score_clustered_xt, sigma_Langevin;
-                      timestepper=:euler, resolution=1)
+                      timestepper=:euler, resolution=100)
 
+dt = 0.1
 # PDF of Langevin trajectory
 kde_langevin = kde(trj_langevin[1, :])
-kde_obs = kde(obs[1, :])
+
 
 # Autocovariance of Langevin trajectory vs observed
 auto_langevin = autocovariance(trj_langevin[1, 1:res:end]; timesteps=tsteps)
+
+########## 7. Plotting ##########
+Plots.default(fontfamily="Computer Modern", guidefontsize=12, tickfontsize=10, legendfontsize=10)
+plotlyjs()
+
+
+
+#Plot PDF
+p_pdf = plot(kde_obs.x, kde_obs.density, label="Observed", lw=2, color=:red)
+plot!(p_pdf, kde_langevin.x, kde_langevin.density, label="Langevin", lw=2, color=:blue)
+xlabel!("x"); ylabel!("Density"); title!("PDF comparison")
+plot!(p_pdf, xax_2, pdf_true; label="PDF analytic", linewidth=2, linestyle=:dash, color=:lime)
+# plot!(p_pdf, xax_2, pdf_interpolated_norm; label="PDF learned", linewidth=2,color=:cyan)
+
+
+#Plot autocovariance
+p_acf = plot(auto_obs, label="", lw=2, color=:red)
+xlabel!("Lag"); ylabel!("Autocorrelation"); title!("Autocorrelation: NN vs Observed")
+plot!(p_acf, auto_langevin, label="", lw=2, color=:blue)
+xlabel!("Time steps"); ylabel!("Autocorrelation"); title!("Autocorrelation comparison")
+
+plot!(p_pdf, [NaN], [NaN], xlabel="\n\n")
+plt = plot(p_pdf, p_acf, layout=(2, 1), size=(800, 600))
+display(plt)
+#plot pdf pdf_gaussian_y2
+# p_y2 = plot(kde_y2.x, pdf_kde; label="PDF of y2(t)", xlabel="y2", ylabel="Density", title="Distribution of y2(t)", linewidth=2)
+# plot!(p_y2, xax_y2, pdf_gaussian_y2; label="Gaussian fit", linewidth=2)
+
+#Plot Score
+p_score = scatter(centers_sorted, scores; color=:blue, alpha=0.2, label="Cluster centers",
+    xlims=(-1.3, 1.3), ylims=(-5, 5), xlabel="𝑥", ylabel="Score(𝑥)", title="Score Function Estimate")
+plot!(p_score, xax, interpolated_score; label="NN interpolation", linewidth=2, color=:red)
+plot!(p_score, xax, true_score; label="Score analytic", linewidth=2, color=:lime)
+
+########## 8. Save ##########
+if save_figs
+    base_path = "/Users/giuliodelfelice/Desktop/MIT"
+    test_folder = joinpath(base_path, "TESTS")
+    mkpath(test_folder)
+    savefig(p_score, joinpath(test_folder, "Interpolation.pdf"))
+    savefig(p_pdf, joinpath(test_folder, "PDFs.pdf"))
+    savefig(p_loss, joinpath(test_folder, "loss_plot.pdf"))
+    savefig(p_acf, joinpath(test_folder, "y2_pdf.pdf"))
+
+else
+    display(p_score)
+    display(p_pdf)
+    display(p_loss)
+    display(p_acf)
+end
+
+
+
+
+
+
+
+
+
 
 ########### VERIFICA ###########
 tsteps = 100
 res = 10
 
-acf_real = autocovariance(obs_nn[1, 1:res:end]; timesteps=tsteps)
+acf_real = autocovariance(obs[1:res:end]; timesteps=tsteps)
 acf_sim = autocovariance(trj_langevin[1, 1:res:end]; timesteps=tsteps)
 
 acf_real_norm = acf_real ./ acf_real[1]
@@ -279,66 +332,3 @@ title!("ACF: real vs simulated")
 
 
                       
-
-########## 7. Plotting ##########
-Plots.default(fontfamily="Computer Modern", guidefontsize=12, tickfontsize=10, legendfontsize=10)
-plotlyjs()
-
-#Plot Score
-p_score = scatter(centers_sorted, scores; color=:blue, alpha=0.2, label="Cluster centers",
-    xlims=(-1.3, 1.3), ylims=(-5, 5), xlabel="𝑥", ylabel="Score(𝑥)", title="Score Function Estimate")
-plot!(p_score, xax, interpolated_score; label="NN interpolation", linewidth=2, color=:red)
-plot!(p_score, xax, true_score; label="Score analytic", linewidth=2, color=:lime)
-
-#Plot PDF
-p_pdf = plot(kde_x.x, kde_x.density, label="Observed", lw=2, color=:blue)
-plot!(p_pdf, kde_langevin.x, kde_langevin.density, label="Langevin", lw=2, color=:red)
-# xlabel!("x"); ylabel!("Density"); title!("PDF comparison")
-plot!(p_pdf, xax_2, pdf_true; label="PDF analytic", linewidth=2, linestyle=:dash, color=:lime)
-plot!(p_pdf, xax_2, pdf_interpolated_norm; label="PDF learned", linewidth=2,color=:cyan)
-
-
-
-
-
-#Plot loss
-p_loss = plot(losses; xlabel="Epoch", ylabel="Loss", title="NN training loss", linewidth=2, label="Loss")
-
-
-
-
-
-#plot pdf pdf_gaussian_y2
-p_y2 = plot(kde_y2.x, pdf_kde; label="PDF of y2(t)", xlabel="y2", ylabel="Density", title="Distribution of y2(t)", linewidth=2)
-plot!(p_y2, xax_y2, pdf_gaussian_y2; label="Gaussian fit", linewidth=2)
-
-#Plot autocovariance
-auto_obs1 = autocovariance(obs_uncorr[1, 1:res:end]; timesteps=tsteps)
-auto_obs1_norm = auto_obs1 ./ auto_obs1[1]
-
-auto_score_only = autocovariance(trj_score_only[1, 1:res:end]; timesteps=tsteps)
-auto_score_only_norm = auto_score_only ./ auto_score_only[1]
-
-p_acf = plot(auto_obs1_norm, label="Observed", lw=2, color=:blue)
-plot!(p_acf, auto_score_only_norm, label="Score-only", lw=2, color=:cyan)
-
-xlabel!("Lag"); ylabel!("Autocorrelation"); title!("Autocorrelation: NN vs Observed")
-plot!(p_acf, auto_langevin ./ var(trj_langevin[1,:]), label="Langevin", lw=2, color=:red)
-xlabel!("Lag"); ylabel!("Autocorrelation"); title!("Autocorrelation comparison")
-
-########## 8. Save ##########
-if save_figs
-    base_path = "/Users/giuliodelfelice/Desktop/MIT"
-    test_folder = joinpath(base_path, "TESTS")
-    mkpath(test_folder)
-    savefig(p_score, joinpath(test_folder, "Interpolation.pdf"))
-    savefig(p_pdf, joinpath(test_folder, "PDFs.pdf"))
-    savefig(p_loss, joinpath(test_folder, "loss_plot.pdf"))
-    savefig(p_acf, joinpath(test_folder, "y2_pdf.pdf"))
-
-else
-    display(p_score)
-    display(p_pdf)
-    display(p_loss)
-    display(p_acf)
-end

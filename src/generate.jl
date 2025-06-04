@@ -119,9 +119,9 @@ function evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:r
             # Add stochastic component
             add_noise!(u, dt, sig, dim)
 
-            # 🛑 Check for divergence
+            # Check for divergence
             if any(isnan.(u)) || any(abs.(u) .> 1e5)
-                @warn "🚨 Divergenza a step $step: u = $u"
+                @warn "Divergenza a step $step: u = $u"
                 break
             end
             
@@ -503,4 +503,125 @@ function evolve_ens(u0, dt, Nsteps, f; resolution=1, n_ens=1)
     end
     
     return result
+end
+
+
+"""
+Adds chaotic noise to state vector using matrix diffusion coefficient.
+
+# Arguments
+- `u`: State vector, modified in-place
+- `dt`: Time step size
+- `σ`: Matrix diffusion coefficient
+- `y2_t`: chaotic noise vector (e.g., from a underlying chaotic process)
+"""
+
+function add_y2!(u, dt, σ::Matrix, y2_t::Vector)
+    u .+= sqrt(2dt) .* (σ * y2_t)
+end
+
+"""
+    evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false)
+
+Evolves a stochastic dynamical system forward in time with chaotic noise.
+
+# Arguments
+- `u0`: Initial state vector
+- `dt`: Time step size
+- `Nsteps`: Total number of steps to evolve
+- `f`: Deterministic drift function f(u, t)
+- `sigma`: Diffusion function sigma(u, t)
+- `Y2_series`: Matrix of chaotic noise vectors (each column corresponds to a time step)
+- `seed`: Random seed for reproducibility
+- `resolution`: Save results every `resolution` steps
+- `timestepper`: Integration method (`:rk4` or `:euler`)
+- `boundary`: If specified as [min, max], resets to u0 when state exceeds these bounds
+
+# Returns
+- Matrix of results with shape (dim, Nsave+1) where Nsave = ceil(Nsteps/resolution)
+"""
+function evolve_chaos(u0, dt, Nsteps, f, sigma, Y2_series; seed=123, resolution=1, timestepper=:rk4, boundary=false)
+    # Initialize state and storage
+    dim = length(u0)
+    Nsave = ceil(Int, Nsteps / resolution)
+
+    u = copy(u0)
+    results = Matrix{Float64}(undef, dim, Nsave+1)  # Store results as (dim, Nsave)
+    results[:, 1] .= u0
+
+    # Set random seed for reproducibility
+    Random.seed!(seed)
+
+    # Select integration method
+    if timestepper == :rk4
+        timestepper = rk4_step!
+    elseif timestepper == :euler
+        timestepper = euler_step!
+    else
+        error("Invalid timestepper specified. Use :rk4 or :euler.")
+    end
+
+    # Initialize time tracking
+    t = 0.0
+    save_index = 1
+    
+    if boundary == false
+        # Standard evolution without boundary conditions
+        for step in ProgressBar(1:Nsteps)
+            # Get diffusion coefficient at current state
+            sig = sigma(u, t)
+            
+            # Perform deterministic step
+            timestepper(u, dt, f, t)
+            
+            # Add stochastic component
+            y2_t = Y2_series[:,step] 
+            add_y2!(u, dt, sig, y2_t)
+
+            # Check for divergence
+            if any(isnan.(u)) || any(abs.(u) .> 1e5)
+                @warn "Divergenza a step $step: u = $u"
+                break
+            end
+            
+            # Update time
+            t += dt
+            
+            # Save results at specified resolution
+            if step % resolution == 0
+                save_index += 1
+                results[:, save_index] .= u
+            end
+        end
+    else
+        # Evolution with boundary conditions
+        count = 0
+        for step in ProgressBar(1:Nsteps)
+            # Get diffusion coefficient at current state
+            sig = sigma(u, t)
+            
+            # Perform deterministic step
+            timestepper(u, dt, f, t)
+            
+            # Add stochastic component
+            add_noise!(u, dt, sig, dim)
+            
+            # Update time
+            t += dt
+            
+            # Reset if boundary is crossed
+            if any(u .< boundary[1]) || any(u .> boundary[2])
+                u .= u0
+                count += 1
+            end
+            
+            # Save results at specified resolution
+            if step % resolution == 0
+                save_index += 1
+                results[:, save_index] .= u
+            end
+        end
+        println("Percentage of boundary crossings: ", count/Nsteps)
+    end
+    return results
 end
