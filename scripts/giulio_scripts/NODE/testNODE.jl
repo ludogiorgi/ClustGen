@@ -89,7 +89,7 @@ function loss_neuralode(p)
     for i in 1:100
         u = data_sample[rand(1:length(data_sample))]
         pred = predict_neuralode(u[:, 1], p, tspan, t)
-        loss += sum(abs2, u[:, 2:end] .- pred[:, 1:end])
+        loss += sum(abs2, (u[:, 2:end] .- pred[:, 1:end])* weights)
     end
     return loss / 100
 end
@@ -100,7 +100,7 @@ end
 # 1. Model definition
 # ------------------------
 
-m = 14  # delay embedding dim
+m = 10  # delay embedding dim
 layers = [m, 256, 256, m]
 activation_hidden = swish
 activation_output = identity
@@ -114,7 +114,7 @@ flat_p0, re = Flux.destructure(model)
 # ------------------------
 
 dt = 0.001f0
-n_steps = 45
+n_steps = 50
 t = collect(0.0f0:dt:dt*(n_steps - 1))
 tspan = (t[1], t[end])
 Nsteps = 1000000
@@ -148,7 +148,7 @@ end
 
 τ_opt, acf = estimate_tau(obs_nn[2, :], dt)
 @info "Scelta ottimale di τ ≈ $(round(τ_opt, digits=4))"
-τ = 0.5* τ_opt
+τ = 0.25* τ_opt
 
 Z = Float32.(delay_embedding(y_norm; τ=τ, m=m))
 
@@ -168,6 +168,9 @@ opt = Optimisers.Adam(0.01)
 state = Optimisers.setup(opt, p)
 n_epochs = 500
 losses = []
+
+weights = exp.(LinRange(0.0f0, -1.0f0, n_steps))
+size(weights)
 
 using BSON: @save
 save_every = 100  # Salva ogni 100 epoche
@@ -195,7 +198,8 @@ display(plt_loss)
 # ------------------------
 # 7. Plot predictions
 # ------------------------
-
+using BSON: @load
+@load "/Users/giuliodelfelice/Desktop/MIT/ClustGen/model_epoch_500.bson" p
 model_trained = re(p)
 
 # First 100 steps prediction vs truth
@@ -222,7 +226,7 @@ plot!(plt1, t_short, y_pred_short, label="Predicted y2(t)", lw=2, ls=:dash, titl
 display(plt1)
 
 # First n_long steps prediction vs truth
-n_long = 1000
+n_long = 1000000
 t_long = collect(0.0f0:dt:dt*(n_long - 1))
 tspan_long = (t_long[1], t_long[end])
 pred_long = predict_with_model(u0, model_trained, tspan_long, t_long)
@@ -231,19 +235,37 @@ y_pred_long = pred_long[1, 1:max_steps]
 y_true_long = Z[1, 1:max_steps]
 t_plot = t_long[1:max_steps]
 
+M_y, S_y = mean(y_pred_long), std(y_pred_long)
+y_pred_long_norm = (y_pred_long .- M_y) ./ S_y
 
 #Plot of the time series
 plotlyjs()
-plt2 = plot(t_plot, y_true_long, label="True y2(t)", lw=2)
-plot!(plt2, t_plot, y_pred_long, label="Predicted y(t)", lw=2, ls=:dash, title="$n_long steps with m= $m, n_steps = $n_steps and dt = $dt")
+plt2 = plot(t_plot[1:end], y_true_long[1:end], label="Observed y2(t)", lw=2, color=:red)
+plot!(plt2, t_plot[1:end], y_pred_long[1:end], label="NODE y(t)", lw=2, color=:blue, title="Trajectories compared")
 display(plt2)
 #plot of the PDFs
 plotlyjs()
-kde_pred = kde(y_pred_long)
+kde_pred = kde(y_pred_long_norm)
 kde_obs = kde(y_true_long)
-plot_kde = plot(kde_pred.x, kde_pred.density; label = "prediction", color = :red)
-plot!(plot_kde, kde_obs.x, kde_obs.density; label = "observations", color = :blue)
+plot_kde = plot(kde_pred.x, kde_pred.density; label = "NODE", lw=2, color = :blue)
+plot!(plot_kde, kde_obs.x, kde_obs.density; label = "observations", lw=2, color = :red, title="PDF compared")
+μ = mean(y_true_long)
+σ = std(y_true_long)
+x_gauss = range(minimum(kde_obs.x), stop=maximum(kde_obs.x), length=500)
+pdf_gauss = pdf.(Normal(μ, σ), x_gauss)
+
+plot!(plot_kde, x_gauss, pdf_gauss; label = "Gaussian", lw=2, color = :lime)
+
 display(plot_kde)
+
+#plot acf
+σ_noise = std(y_true_long .- y_pred_long)   # oppure ≈ 0.01 × std
+y_pred_noisy = y_pred_long .+ 1.5*σ_noise * randn(length(y_pred_long))
+
+acf_NODE = autocovariance(y_pred_noisy, timesteps=2000)
+acf_true = autocovariance(y_true_long, timesteps=2000)
+plot(acf_true, lw=2, color=:red, label= "Observed", title="ACF")
+plot!(acf_NODE, lw=2, color=:blue, label="NODE", xlabel="Lag", ylabel="ACF")
 
 
 #=============== END MAIN ===============#

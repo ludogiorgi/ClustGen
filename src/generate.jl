@@ -33,6 +33,7 @@ function euler_step!(u, dt, f, t)
     @inbounds u .= u .+ dt .* k1
 end
 
+
 """
     add_noise!(u, dt, σ::Union{Real,Vector}, dim)
 
@@ -62,6 +63,7 @@ Adds correlated Gaussian noise to state vector using matrix diffusion coefficien
 function add_noise!(u, dt, σ::Matrix, dim)
     u .+= sqrt(2dt) .* (σ * randn(dim))
 end
+
 
 """
     evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false)
@@ -516,10 +518,18 @@ Adds chaotic noise to state vector using matrix diffusion coefficient.
 - `y2_t`: chaotic noise vector (e.g., from a underlying chaotic process)
 """
 
-function add_y2!(u, dt, σ::Matrix, y2_t::Vector)
+function add_y2!(u, dt, σ::Matrix, y2_t)
     u .+= sqrt(2dt) .* (σ * y2_t)
 end
 
+""" 
+    add_y2!(u, dt, σ::Real, y2_t::Vector)
+version of add_noise with scalar sigma
+"""
+
+function add_y2!(u, dt, σ::Real, y2_t)
+    u .+= sqrt(2 * dt) * σ .* y2_t
+end
 """
     evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false)
 
@@ -575,7 +585,7 @@ function evolve_chaos(u0, dt, Nsteps, f, sigma, Y2_series; seed=123, resolution=
             timestepper(u, dt, f, t)
             
             # Add stochastic component
-            y2_t = Y2_series[:,step] 
+            y2_t = Y2_series[step] 
             add_y2!(u, dt, sig, y2_t)
 
             # Check for divergence

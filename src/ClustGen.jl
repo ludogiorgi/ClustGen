@@ -69,7 +69,7 @@ export σ_variance_exploding, g_variance_exploding
 export vectorfield2d, meshgrid
 
 # Data generation
-export evolve, evolve_ens
+export evolve, evolve_ens, evolve_chaos
 
 # Statistical utilities
 export covariance, cleaning
