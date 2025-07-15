@@ -85,25 +85,6 @@ function dudt!(du, u, p, t)
     du .= re(p)(u)
 end
 
-# function evolve_model_rk4(u0::AbstractVector, f::Function, steps::Int, dt::Float64)
-#     dim = length(u0)
-#     output = Matrix{eltype(u0)}(undef, dim, steps + 1)
-#     output[:, 1] = u0
-#     x = u0
-
-#     for i in 1:steps
-#         k1 = f(x)
-#         k2 = f(x .+ dt/2 .* k1)
-#         k3 = f(x .+ dt/2 .* k2)
-#         k4 = f(x .+ dt .* k3)
-#         x = x .+ dt/6 .* (k1 .+ 2k2 .+ 2k3 .+ k4)
-#         output[:, i+1] = x
-#     end
-
-#     return output
-# end
-
-
 
 
 function predict_neuralode(u0, p, tspan, t)
@@ -118,26 +99,22 @@ function loss_neuralode(p)
     for i in 1:100
         u = data_sample[rand(1:length(data_sample))]
         pred = predict_neuralode(u[:, 1], p, tspan, t)
-        loss += sum(abs2, u[:, 2:end] .- pred[:, 1:end])
+        loss += sum(abs2, (u[:, 2:end] .- pred[:, 1:end])* weights)
     end
-    return loss / 50
+    return loss / 100
 end
 
-# function loss_neuralode_rk4(p)
-#     loss = 0.0f0
-#     model = re(p)
-#     f = x -> model(x) |> first
-  # questa è compatibile con evolve_model_rk4
-
-
-#     for i in 1:100
-#         u = data_sample[rand(1:end)]
-#         pred = evolve_model_rk4(u[:, 1], f, size(u, 2) - 1, Float64(dt))
-#         loss += sum(abs2, u[:, 2:end] .- pred)
-#     end
-
-#     return loss / 100
-# end
+#==================== EXTRACT FAST SIGNAL FROM SLOW SIGNAL ====================#
+function estimate_y2(x::Vector{Float64}, Σ::Float64, dt::Float64)
+    N = length(x) - 1
+    y2_estimated = zeros(Float64, N)
+    for n in 1:N
+        dx_dt = (x[n+1] - x[n]) / dt
+        s = score_clustered_xt(x[n], n * dt)
+        y2_estimated[n] = (dx_dt - s[1]) / Σ
+    end
+    return y2_estimated
+end
 
 
 #========== MAIN ==========#
@@ -146,7 +123,7 @@ end
 # 1. Model definition
 # ------------------------
 
-m = 11  # delay embedding dim
+m = 10  # delay embedding dim
 layers = [m, 256, 256, m]
 activation_hidden = swish
 activation_output = identity
@@ -165,7 +142,7 @@ fix_initial_state = false
 save_figs = false
 dim = 4 # Number of dimensions in the system
 dt = 0.001f0
-n_steps = 55
+n_steps = 100
 t = collect(0.0f0:dt:dt*(n_steps - 1))
 tspan = (t[1], t[end])
 Nsteps = 10000000
@@ -176,82 +153,118 @@ M = mean(obs_nn, dims=2)[1]
 S = std(obs_nn, dims=2)[1]
 obs = (obs_nn[1:1,:] .- M) ./ S
 obs_signal = obs[1, :]
-plot(obs_signal[1:100:10000000])
-# Estrai la terza variabile
-signal_raw = obs_nn[3, :]
+kde_obs = kde(obs[1, :])
+
+signal_raw = Float32.(obs_nn[3, :])
 
 # Normalizza
-M = mean(signal_raw)
-S = std(signal_raw)
-signal_norm = (signal_raw .- M) ./ S
-
-# ========== MOVING AVERAGE AND RESIDUALS ========== #
-# using ImageFiltering
-
-# # Parametri
-# window_radius = 20  # metà finestra → finestra totale = 2*radius + 1 = 99
-# σ_gauss = window_radius / 3   # regola empirica
-#        # deviazione standard della finestra gaussiana
-
-# # Finestra gaussiana centrata
-# g_kernel = exp.(-((-window_radius):window_radius).^2 ./ (2 * σ_gauss^2))
-# g_kernel ./= sum(g_kernel)  # normalizza per avere somma 1
-
-# # Applica la convoluzione gaussiana
-# smoothed = imfilter(obs_signal, g_kernel, "reflect")
-using ImageFiltering          # il pacchetto rimane lo stesso
-
-# ----------------- parametri -----------------
-window_radius = 3                    # metà finestra
-window_size   = 2*window_radius + 1    # lunghezza totale (41)
-
-# ----------- kernel uniforme (box) ----------
-u_kernel = fill(1/window_size, window_size)   # somma = 1
-
-# ----------- convoluzione -------------------
-smoothed = imfilter(obs_signal, u_kernel, "reflect")
+M_2 = mean(signal_raw)
+S_2 = std(signal_raw)
+signal_norm = (signal_raw .- M_2) ./ S_2
 
 
-residual = obs_signal .- smoothed
-mean_res = mean(residual)
-std_res = std(residual)
-res_norm = (residual .- mean_res) ./ std_res
+#ORA AL POSTO DI FARE LA MOVING AVERAGE ESTRAIAMO LA Y2 DA X E SCORE FUNCTION. E VEDIAMO COME VA
+# ========== COMPUTE SCORE FUNCTION USING FIRST NN ========== #
+autocov_obs_nn = zeros(4, 100)#
 
+for i in 1:4
+    autocov_obs_nn[i, :] = autocovariance(obs_nn[i, :]; timesteps=100)
+end
+
+D_eff = dt * (0.5 * autocov_obs_nn[3, 1] + sum(autocov_obs_nn[3, 2:end-1]) + 0.5 * autocov_obs_nn[3, end])
+D_eff = 0.3
+@show D_eff
+
+# plt_12 = plot(autocov_obs_nn[1,:], label="X", xlabel="Lag", ylabel="Autocovariance", title="Autocovariance of x")
+
+
+#training and clustering parameters 
+σ_value=0.05
+prob=0.001
+conv_param=0.02
+n_epochs=5000
+batch_size=16
+
+
+########## 3. Clustering ##########
+averages, centers, Nc, labels = f_tilde_labels(σ_value, obs[:,1:10:end]; prob=prob, do_print=false, conv_param=conv_param, normalization=false)
+inputs_targets = generate_inputs_targets(averages, centers, Nc; normalization=false)
+
+########## 4. Score Functions ##########
+
+#analytic score function
+f1(x,t) = x .- x.^3
+score_true(x, t) = normalize_f(f1, x, t, M, S)
+
+#learned score function
+#kde_x = kde(obs_nn[1, :])
+centers_sorted_indices = sortperm(centers[1, :])
+centers_sorted = centers[:, centers_sorted_indices][:]
+scores = .- averages[:, centers_sorted_indices][:] ./ σ_value
+
+########## 5. Train NN ##########
+@time nn, losses = train(inputs_targets, n_epochs, batch_size, [1, 50, 25, 1];
+    opt=Flux.Adam(0.001), activation=swish, last_activation=identity,
+    use_gpu=false)
+
+nn_clustered_cpu = nn |> cpu
+score_clustered(x) = .- nn_clustered_cpu(reshape(Float32[x...], :, 1))[:] ./ σ_value
+score_clustered([0.1])
+
+
+########## Phi calculation ##########
+dt=0.01
+#rate matrix
+Q = generator(labels; dt=dt)*0.2
+P_steady = steady_state(Q)
+#test if Q approximates well the dynamics
+tsteps = 51
+res = 10
+
+auto_obs = autocovariance(obs[1:res:end]; timesteps=tsteps) 
+auto_Q = autocovariance(centers[1,:], Q, [0:dt*res:Int(res * (tsteps-1) * dt)...])
+
+
+plt = Plots.plot(auto_obs)
+plt = Plots.plot!(auto_Q)
+
+#compute the score function
+gradLogp = - averages ./ σ_value
+
+
+#compute Phi and Σ
+M_Q = centers * Q * (centers *Diagonal(P_steady))'
+V_Q = gradLogp * (centers * Diagonal(P_steady))'
+Φ = (M_Q * inv(V_Q))[1,1]
+Σ = sqrt(Φ) 
+
+########## Test effective dynamics ##########
+score_clustered_xt(x, t) = Φ * score_clustered(x)
+autocov_y2 = autocovariance(signal_norm; timesteps=1000)
+plot(autocov_y2, label="Autocovariance of y2", xlabel="Lag", ylabel="Autocovariance",
+    title="Autocovariance of the estimated y2 signal", linewidth=2)
+dt
+########## Estimate y2 from the slow variable x ##########
+dt = 0.001
+fast_sig = estimate_y2(obs[1,:], Σ, dt)
+
+M_fast = mean(fast_sig)
+S_fast = std(fast_sig)
+fast_sig_norm = (fast_sig .- M_fast) ./ S_fast
+
+# Plot the estimated y2
 plotlyjs()
-plot(signal_norm[10:10000])
-plot!(res_norm[10:10000])
+plt_fast_sig = plot(fast_sig_norm[1:10000], label="Estimated y2", xlabel="Time Step", ylabel="Normalized y2",
+    title="Estimated y2 from Score Function", lw=2, color=:red)
+plot!(plt_fast_sig, signal_norm[1:10000], label="Original y2", lw=2, color=:blue)
 
-# ========== PLOT VERIFICA ========== #
-# #plot time series
-# plotlyjs()
-# plot(smoothed[1:10000000], label="Smoothed signal", xlabel="Time", ylabel="Amplitude", title="Moving Average of Observed Signal", linewidth=2)
-# plot!(obs_signal[1:10000000])
-# plot(residual[1:1000000], label="Residual", xlabel="Time", ylabel="Amplitude", title="Residual of Observed Signal", linewidth=2)
-# plot!(obs_signal[1:1000000])
-
-#plot pdf oscillations
-kde_res = kde(residual)
-kde_res_norm = kde(res_norm)
-kde_real_y2 = kde(signal_norm)
-plt_pdf_residual = plot(kde_real_y2.x, kde_real_y2.density, label="PDF Residual", xlabel="y2", ylabel="Density", title="PDF of Residual Signal", linewidth=2)
-plot!(plt_pdf_residual, kde_res_norm.x, kde_res_norm.density, label="PDF Residual Normalized", xlabel="y2", ylabel="Density", title="PDF of Normalized Residual Signal", linewidth=2)
-# autocov_res_norm = autocovariance(res_norm)
-# acov = autocovariance(signal_norm; timesteps=500)
-
-# plotlyjs()
-# plot(autocov_res_norm)
-# plot!(acov)
-
-# plot(plt_pdf_residual, xax_y2, pdf_gaussian_y2, label="Gaussian", xlabel="y2", ylabel="Density", title="KDE of Residual Signal", linewidth=2)
-
-
-#see if pdf oscillations is centered around 0 and has unit variance
-μ = sum(kde_res_norm.density .* kde_res_norm.x) * step(kde_res_norm.x)
-σ² = sum((kde_res_norm.x .- μ).^2 .* kde_res_norm.density) * step(kde_res_norm.x)
-
-#plot pdf of smoothed signal
-kde_smoothed = kde(smoothed)
-plot(kde_smoothed.x, kde_smoothed.density, label="PDF Smoothed", xlabel="y2", ylabel="Density", title="PDF of Smoothed Signal", linewidth=2)
+kde_fast_sig = kde(fast_sig_norm)
+kde_signal_norm = kde(signal_norm)
+plotlyjs()
+plt_kde = plot(kde_fast_sig.x, kde_fast_sig.density, label="    Estimated y2 PDF", lw=2, color=:red)
+plot!(plt_kde, kde_signal_norm.x, kde_signal_norm.density, label="  Original y2 PDF", lw=2, color=:blue,
+    title="PDF Estimated vs Real",
+    xlabel="y2", ylabel="Density")
 
 # ========= ESTIMATE OPTIMAL Tau ========= #
 function estimate_tau(y, dt; threshold=0.2)
@@ -265,24 +278,25 @@ function estimate_tau(y, dt; threshold=0.2)
     return dt * length(acf), acf
 end
 
-τ_opt, acf = estimate_tau(res_norm, dt)
+τ_opt, acf = estimate_tau(fast_sig_norm, dt)
 
 
 @info "Scelta ottimale di τ ≈ $(round(τ_opt, digits=4))"
-τ = τ_opt  
+τ = 0.3*τ_opt  
 
-Z = Float32.(delay_embedding(res_norm; τ=τ, m=m))
-kde1= kde(res_norm)
-kde2 = kde(signal_norm)
-plot(kde1.x, kde1.density)
-plot!(kde2.x, kde2.density)
+Z = Float32.(delay_embedding(fast_sig_norm; τ=τ, m=m))
+Z[:,1]
 # ------------------------
-# 3. Batching
+# 3. Batching for NODE training
 # ------------------------
 
 batch_size = n_steps + 1
 n_batches = 2000
 data_sample = gen_batches(Z, batch_size, n_batches)
+
+acf_fast = autocovariance(fast_sig_norm; timesteps=1000)
+plot(acf_fast, label="Autocovariance of fast signal", xlabel="Lag", ylabel="Autocovariance",
+    title="Autocovariance of the estimated y2 signal", linewidth=2)
 
 # ------------------------
 # 4. Training the model
@@ -292,6 +306,9 @@ opt = Optimisers.Adam(0.01)
 state = Optimisers.setup(opt, p)
 n_epochs = 500
 losses = []
+
+weights = exp.(LinRange(0.0f0, -1.0f0, n_steps))
+size(weights)
 
 using BSON: @save
 save_every = 100  # Salva ogni 100 epoche
@@ -353,7 +370,7 @@ plot(plt_loss, losses, title="Loss vs Epoch", xlabel="Epoch", ylabel="Loss", lab
 # ------------------------
 # 7. Plot predictions
 # ------------------------
-@load "/Users/giuliodelfelice/Desktop/MIT/ClustGen/model_epoch_500.bson" p
+@load "/Users/giuliodelfelice/Desktop/MIT/MODELLO TRAINATO CHE ANDAVA ABBASTANZA BENE CON LA y2 estratta dalla x/model_epoch_500.bson" p
 model_trained = re(p)
 
 # First 100 steps prediction vs truth
@@ -380,36 +397,129 @@ plot!(plt1, t_short, y_pred_short, label="Predicted y2(t)", lw=2, ls=:dash, titl
 
 # First n_long steps prediction vs truth
 dt = 0.001
-n_long = min(1000000, size(Z, 2))
+size(Z, 2)
+n_long = min(10000000, size(Z, 2))
 t_long = collect(0.0f0:dt:dt*(n_long - 1))
 tspan_long = (t_long[1], t_long[end])
 pred_long = predict_with_model(u0, model_trained, tspan_long, t_long)
 max_steps = min(size(pred_long, 2), size(Z, 2))
-y_pred_long = pred_long[1, 1:max_steps]
+y_pred_long = pred_long[1, 1:max_steps] 
+mu, sigy = mean(y_pred_long), std(y_pred_long)
+y_pred_long = (y_pred_long .- mu) ./ sigy  # Normalize the predicted signal
+
 y_true_long = Z[1, 1:max_steps]
 t_plot = t_long[1:max_steps]
+y_true_long[1,1]
+y_pred_long[1,1]
+u0
+pred_long[1,1]
+using FFTW
+using Plots
+
+function plot_power_spectrum(signal::Vector{Float64}; dt=0.001, label::String="")
+    N = length(signal)
+    signal = signal .- mean(signal)  # remove DC offset
+    yf = abs.(fft(signal))[1:div(N,2)]  # FFT, keep positive freqs
+    psd = (1 / (N * dt)) * (yf .^ 2)
+    freqs = (0:(N÷2 - 1)) / (N * dt)
+    plot(freqs, psd; xscale=:log10, yscale=:log10, label=label,
+         xlabel="Frequency [Hz]", ylabel="Power Spectral Density", lw=2)
+end
+
+# Convert to Float64 if needed
+y_true_vec = Float64.(y_true_long)
+y_pred_vec = Float64.(y_pred_long)
+
+plotlyjs()
+p = plot()
+plot!(p, plot_power_spectrum(y_true_vec; dt=dt, label="True y₂"))
+plot!(p, plot_power_spectrum(y_pred_vec; dt=dt, label="NODE prediction"))
+display(p)
 
 
 #Plot of the time series
 plotlyjs()
-plt2 = plot(t_plot, y_true_long, label="True y2(t)", lw=2)
-plot!(plt2, t_plot, y_pred_long, label="Predicted y(t)", lw=2, ls=:dash, title="$n_long steps with m= $m, n_steps = $n_steps and dt = $dt")
+plt2 = plot(t_plot[1:end], y_true_long[1:end], label="True y2(t)", lw=2)
+plot!(plt2, t_plot[1:end], y_pred_long[1:end], label="Predicted y(t)", lw=2, title="$n_long steps with m= $m, n_steps = $n_steps and dt = $dt")
 
 #plot of the PDFs
+
 plotlyjs()
 kde_pred = kde(y_pred_long)
-kde_obs = kde(y_true_long)
+kde_obs_y2 = kde(y_true_long)
 plot_kde = plot(kde_pred.x, kde_pred.density; label = "prediction", color = :red)
-plot!(plot_kde, kde_res_norm.x, kde_res_norm.density; label = "observations", color = :blue)
+plot!(plot_kde, kde_obs_y2.x, kde_obs_y2.density; label = "observations", color = :blue)
 
 # Display the plots
 
-display(plt_loss)
+#display(plt_loss)
 display(plt1)
 display(plt2)
 display(plot_kde)
+#================== SIMULATE LANGEVIN DYNAMICS ==================#
+plot(y_true_long .- y_pred_long, label="Residual error")
+
+τ_y2 =2.0
+# Diffusion coefficient accounting for non zero decorellation time √(2Φ)
+sigma_Langevin(x,t) = Σ / sqrt(20 * τ_y2) 
+
+# Langevin dynamics
+size(y_pred_long)
+timesteps = 900000
+dt = 0.01
+traj_langevin = evolve_chaos([0.0], dt, timesteps, score_clustered_xt, sigma_Langevin, y_pred_long[1:10:end]; timestepper=:euler, resolution=1)
+traj_langevin_2 = evolve_chaos([0.0], dt, timesteps,score_clustered_xt, sigma_Langevin, y_true_long[1:10:end]; timestepper=:euler, resolution=1)
 
 
+
+
+M_langevin = mean(traj_langevin[1, :])[1]
+S_langevin = std(traj_langevin[1, :])[1]
+traj_langevin_norm = (traj_langevin[1:1, :] .- M_langevin) ./ S_langevin
+
+M_langevin_2 = mean(traj_langevin_2[1, :])[1]
+S_langevin_2 = std(traj_langevin_2[1, :])[1]
+traj_langevin_norm_2= (traj_langevin_2[1:1, :] .- M_langevin_2) ./ S_langevin_2
+
+size(traj_langevin_norm)
+# compare_plt= plot(traj_langevin_norm[1, 1:end], label="Langevin y2(t)", xlabel="Time Step", ylabel="Normalized y2",
+#     title="Langevin y2(t) time series", lw=2, color=:blue)
+# plot!(compare_plt, traj_langevin_norm_2[1, 1:end], label="Observed y2(t)", lw=2, color=:red)
+# plot!(compare_plt, obs[1, 1:10:timesteps*10], label="Real y2(t)", lw=2, color=:green)
+
+# display(compare_plt)
+
+kde_langevin = kde(traj_langevin_norm[1,:])
+kde_obs = kde(obs[1, :])
+kde_langevin_2 = kde(traj_langevin_norm_2[1,:])
+
+function normalize_f(f, x, t, M, S)
+    return f(x .* S .+ M, t) .* S
+end
+
+
+function true_pdf_normalized(x)
+    x_phys = x .* S[1] .+ M[1]
+    U = .-0.5 .* x_phys.^2 .+ 0.25 .* x_phys.^4
+    p = exp.(-2 .* U ./ D_eff)
+    return p ./ S[1]
+end
+
+xax = [-1.25:0.005:1.25...]
+xax_2 = [-1.6:0.02:1.6...]
+interpolated_score = [score_clustered(xax[i])[1] for i in eachindex(xax)]
+true_score = [2 * score_true(xax[i], 0.0)[1] / D_eff for i in eachindex(xax)]
+pdf_interpolated_norm = compute_density_from_score(xax_2, score_clustered)
+pdf_true = true_pdf_normalized(xax_2)
+scale_factor = maximum(kde_obs.density) / maximum(pdf_true)
+pdf_true .*= scale_factor
+
+p_pdf = plot(kde_obs.x, kde_obs.density, label="Observed", lw=2, color=:red)
+plot!(p_pdf, xax_2, pdf_true; label="PDF analytic", linewidth=2, linestyle=:dash, color=:lime)
+# plot!(p_pdf, xax_2, pdf_interpolated_norm; label="PDF learned", linewidth=2,color=:cyan)
+plot!(p_pdf, kde_langevin.x, kde_langevin.density, label="PDF of Langevin y2(t)", xlabel="y2", ylabel="Density", title="PDF comparison", linewidth=2, color=:blue)
+# plot!(p_pdf, kde_langevin_2.x, kde_langevin_2.density, label="PDF of Langevin", xlabel="y2", ylabel="Density", title="PDF comparison", linewidth=2, color=:green)
+#autocov_langevin = autocovariance(traj_langevin_norm[1,1:100000]; timesteps=500)
 #=============== END MAIN ===============#
 
 
@@ -419,134 +529,82 @@ display(plot_kde)
 
 
 
-# TEST DEGLI IPERPARAMETRI SU 50 EPOCHE
-# ============ SETUP ============ #
-
-dt = 0.001f0
-m = 13
-τ = 0.4*τ_opt
-n_steps = 45
-η = 0.01
-#n_epochs = 100
 
 
-Z = Float32.(delay_embedding(res_norm; τ=τ, m=m))
-batch_size = n_steps + 1
-n_batches = 2000
-data_sample = gen_batches(Z, batch_size, n_batches)
-t = collect(0.0f0:dt:dt*(n_steps - 1))  # questo DEVE essere coerente con n_steps
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+sigma_Langevin(x, t) = Σ 
+
+
+# Simulate Langevin dynamics
+Nsamples = 100000000
+t = collect(0:dt:dt*(Nsamples-1))  # esplicitamente un vettore
+length(t)
 tspan = (t[1], t[end])
-layers = [m, 64, 64, m]
-activation_hidden = swish
-activation_output = identity
-model = create_nn(layers; activation_hidden=activation_hidden, activation_output=activation_output)
+u0 = [randn()]
 
-#extract parameters from the model
-flat_p0, re = Flux.destructure(model)
+traj_langevin = evolve(u0, dt, Nsteps, score_clustered_xt, sigma_Langevin; timestepper=:euler, resolution=10)
+size(traj_langevin)
+length(traj_langevin[1,:])
+kde_langevin = kde(traj_langevin[1,:])
+auto_langevin = autocovariance(traj_langevin[1,:]; timesteps=tsteps)
+# plot(kde_y2_test.x, kde_y2_test.density, label="PDF of Langevin y2(t)", xlabel="y2", ylabel="Density", title="Distribution of Langevin y2(t)", linewidth=2)
+
+# plot(traj_langevin, label="Langevin x", xlabel="Time", ylabel="x", title="Langevin x time series")
 
 
-opt = Optimisers.Adam(η)
-p = flat_p0  # punto di partenza
-state = Optimisers.setup(opt, p)
-
-n_epochs = 500
-n_val = 200
-
-Random.seed!(42)  # per consistenza
-val_samples = data_sample[1:n_val]
-train_samples = data_sample[(n_val+1):end]
-
-losses_short = []
-
-# ============ LOSS con input custom ============ #
-function loss_neuralode_samples(p, samples)
-    total = 0.0f0
-    for u in samples
-        pred = predict_neuralode(u[:, 1], p, tspan, t)
-        total += sum(abs2, u[:, 2:end] .- pred[:, 1:end])
-    end
-    return total / length(samples)
+function normalize_f(f, x, t, M, S)
+    return f(x .* S .+ M, t) .* S
 end
 
-# ============ TRAINING ============ #
-@info "🔁 Inizio short training (50 epoche)"
 
-for epoch in ProgressBar(1:n_epochs)
-    # Mini-batch da 10 campioni casuali
-    batch = [train_samples[rand(1:end)] for _ in 1:10]
-
-    # Calcola gradienti su batch
-    loss_val, back = Flux.withgradient(p) do p
-        loss_neuralode_samples(p, batch)
-    end
-
-    # Aggiorna i pesi
-    state, p = Optimisers.update(state, p, back[1])
-    push!(losses_short, loss_val)
+function true_pdf_normalized(x)
+    x_phys = x .* S[1] .+ M[1]
+    U = .-0.5 .* x_phys.^2 .+ 0.25 .* x_phys.^4
+    p = exp.(-2 .* U ./ D_eff)
+    return p ./ S[1]
 end
 
-# ============ VALIDAZIONE ============ #
-val_loss = loss_neuralode_samples(p, val_samples)
+xax = [-1.25:0.005:1.25...]
+xax_2 = [-1.6:0.02:1.6...]
+interpolated_score = [score_clustered(xax[i])[1] for i in eachindex(xax)]
+true_score = [2 * score_true(xax[i], 0.0)[1] / D_eff for i in eachindex(xax)]
+pdf_interpolated_norm = compute_density_from_score(xax_2, score_clustered)
+pdf_true = true_pdf_normalized(xax_2)
+scale_factor = maximum(kde_obs.density) / maximum(pdf_true)
+pdf_true .*= scale_factor
 
-@info "✅ Fine short training"
-@info "📉 Ultima training loss: $(losses_short[end])"
-@info "📏 Validation loss: $val_loss"
-
-# ============ PLOT (opzionale) ============ #
-plt_loss = plot(losses_short, xlabel="Epoch", ylabel="Loss", label="Training loss (short run)", title="Quick Hyperparam Test")
-
-model_trained = re(p)
-
-# First 100 steps prediction vs truth
-u0 = Z[:, 1]
-t_short = collect(0.0f0:dt:dt*99)
-tspan_short = (t_short[1], t_short[end])
-
-function predict_with_model(u0, model, tspan, t)
-    function dudt!(du, u, _, t)
-        du .= model(u)
-    end
-    prob = ODEProblem(dudt!, u0, tspan)
-    sol = solve(prob, Tsit5(), saveat=t)
-    return hcat(sol.u...)
-end
-
-pred_short = predict_with_model(u0, model_trained, tspan_short, t_short)
-y_pred_short = pred_short[1, :]
-y_true_short = Z[1, 1:100]
-
+########## 7. Plotting ##########
+Plots.default(fontfamily="Computer Modern", guidefontsize=12, tickfontsize=10, legendfontsize=10)
 plotlyjs()
-plt1 = plot(t_short, y_true_short, label="True y2(t)", lw=2)
-plot!(plt1, t_short, y_pred_short, label="Predicted y2(t)", lw=2, ls=:dash, title="Prediction: 100 steps")
-
-# First n_long steps prediction vs truth
-dt = 0.001
-n_long = min(50000, size(Z, 2))
-t_long = collect(0.0f0:dt:dt*(n_long - 1))
-tspan_long = (t_long[1], t_long[end])
-pred_long = predict_with_model(u0, model_trained, tspan_long, t_long)
-max_steps = min(size(pred_long, 2), size(Z, 2))
-y_pred_long = pred_long[1, 1:max_steps]
-y_true_long = Z[1, 1:max_steps]
-t_plot = t_long[1:max_steps]
 
 
-#Plot of the time series
-plotlyjs()
-plt2 = plot(t_plot, y_true_long, label="True y2(t)", lw=2)
-plot!(plt2, t_plot, y_pred_long, label="Predicted y(t)", lw=2, ls=:dash, title="$n_long steps with m= $m, n_steps = $n_steps dt = $dt and τ = $round(τ, digits = 3)")
 
-#plot of the PDFs
-plotlyjs()
-kde_pred = kde(y_pred_long)
-kde_obs = kde(y_true_long)
-plot_kde = plot(kde_pred.x, kde_pred.density; label = "prediction", color = :red)
-plot!(plot_kde, kde_res_norm.x, kde_res_norm.density; label = "observations", color = :blue)
 
-# Display the plots
+#Plot PDF
+p_pdf = plot(kde_obs.x, kde_obs.density, label="Observed", lw=2, color=:red)
+plot!(p_pdf, kde_langevin.x, kde_langevin.density, label="Langevin", lw=2, color=:blue)
+xlabel!("x"); ylabel!("Density"); title!("PDF comparison")
+plot!(p_pdf, xax_2, pdf_true; label="PDF analytic", linewidth=2, linestyle=:dash, color=:lime)
+# plot!(p_pdf, xax_2, pdf_interpolated_norm; label="PDF learned", linewidth=2,color=:cyan)
 
-display(plt_loss)
-display(plt1)
-display(plt2)
-display(plot_kde)
+#Plot Score
+p_score = scatter(centers_sorted, scores; color=:blue, alpha=0.2, label="Cluster centers",
+    xlims=(-1.3, 1.3), ylims=(-5, 5), xlabel="𝑥", ylabel="Score(𝑥)", title="Score Function Estimate")
+plot!(p_score, xax, interpolated_score; label="NN interpolation", linewidth=2, color=:red)
+plot!(p_score, xax, true_score; label="Score analytic", linewidth=2, color=:lime)
 
+display(p_score)
+display(p_pdf) 

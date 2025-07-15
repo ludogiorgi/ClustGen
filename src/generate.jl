@@ -559,6 +559,9 @@ function evolve_chaos(u0, dt, Nsteps, f, sigma, Y2_series; seed=123, resolution=
     results = Matrix{Float64}(undef, dim, Nsave+1)  # Store results as (dim, Nsave)
     results[:, 1] .= u0
 
+    println("DEBUG: u0 = ", u0)
+    println("DEBUG: results[:, 1] = ", results[:, 1])
+
     # Set random seed for reproducibility
     Random.seed!(seed)
 
@@ -630,6 +633,12 @@ function evolve_chaos(u0, dt, Nsteps, f, sigma, Y2_series; seed=123, resolution=
                 save_index += 1
                 results[:, save_index] .= u
             end
+            if step == 1
+                println("DEBUG after first step:")
+                println("results[:, 1] = ", results[:, 1])
+                println("results[:, 2] = ", results[:, 2])
+            end
+
         end
         println("Percentage of boundary crossings: ", count/Nsteps)
     end
