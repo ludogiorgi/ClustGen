@@ -27,7 +27,7 @@ function parallel_assign_labels(x, state_space_partitions)
     prog_lock = ReentrantLock()
     
     # Parallelize the label assignment
-    Threads.@threads for i in 1:n_points
+    @inbounds Threads.@threads for i in 1:n_points
         # Compute embedding for this data point
         labels[i] = state_space_partitions.embedding(x[:,i])
         
@@ -94,7 +94,7 @@ function calculate_averages(X, z, x, y)
     prog_lock = ReentrantLock()
     
     # Parallel accumulation of sums
-    Threads.@threads for i in 1:Nz
+    @inbounds Threads.@threads for i in 1:Nz
         tid = Threads.threadid()
         segment_index = X[i]
         
@@ -117,7 +117,7 @@ function calculate_averages(X, z, x, y)
     count = sum(local_count)
     
     # Calculate averages using vectorized operations
-    for i in 1:Nc
+    @inbounds for i in 1:Nc
         if count[i] > 0
             # Pre-compute inverse count for faster division
             inv_count = 1.0 / count[i]
@@ -155,7 +155,7 @@ function generate_inputs_targets(diff_times, averages_values, centers_values, Nc
         M_averages_values = maximum(hcat(averages_values...))
         m_averages_values = minimum(hcat(averages_values...))
         
-        for (i, t) in enumerate(diff_times)
+        @inbounds for (i, t) in enumerate(diff_times)
             # Normalize current time's averages
             averages_values_norm = (averages_values[i] .- m_averages_values) ./ (M_averages_values - m_averages_values)
             
@@ -169,7 +169,7 @@ function generate_inputs_targets(diff_times, averages_values, centers_values, Nc
             push!(targets, targets_t)
         end
     else
-        for (i, t) in enumerate(diff_times)
+        @inbounds for (i, t) in enumerate(diff_times)
             # Format inputs with time parameter appended
             inputs_t = hcat([[centers_values[i][:,j]..., t] for j in 1:Nc_values[i]]...)
             
@@ -320,7 +320,7 @@ function f_tilde(σ_values::Vector{Float64}, diff_times::Vector{Float64}, μ;
     Nc_values = []
     
     # Process each noise level
-    for i in eachindex(σ_values)
+    @inbounds for i in eachindex(σ_values)
         averages, averages_residual, centers, Nc, _ = f_tilde_σ(σ_values[i], μ; 
                                                            prob=prob, 
                                                            do_print=do_print, 
@@ -420,7 +420,7 @@ function f_tilde_labels(σ_value::Float64, μ;
     x, _ = generate_xz(μ, σ_value)
     
     # Apply partition to get labels
-    labels = [ssp.embedding(x[:,i]) for i in 1:size(x)[2]]
+    labels = [@inbounds ssp.embedding(x[:,i]) for i in 1:size(x)[2]]
     
     return averages, centers, Nc, labels
 end

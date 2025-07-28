@@ -26,3 +26,19 @@ Manifest.toml
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# NetCDF data files
+*.nc
+*.nc4
+
+# PlaSim data directory
+scripts/PlaSim/PlaSim_data/
+
+# Other large data formats
+*.dat
+*.csv
+*.h5
+*.hdf5
+*.mat
+*.jld
+*.jld2

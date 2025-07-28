@@ -109,7 +109,7 @@ end
 
 dim = 6
 dt = 1.0
-Nsteps = 100000000
+Nsteps = 1000000
 obs_nn = evolve(0.1 .* randn(dim), dt, Nsteps, F_fast, sigma; resolution = 1)
 
 M = mean(obs_nn, dims=2)
@@ -168,7 +168,7 @@ Plots.scatter(obs_uncorr[1,1:100:100000], obs_uncorr[2,1:100:100000], obs_uncorr
 normalization = false
 σ_value = 0.05
 
-averages, _, centers, Nc, ssp = f_tilde_ssp(σ_value, obs_uncorr; prob=0.000025, do_print=true, conv_param=0.2, normalization=normalization)
+averages, _, centers, Nc, ssp = f_tilde_ssp(σ_value, obs_uncorr; prob=0.000025, do_print=true, conv_param=0.002, normalization=normalization)
 
 if normalization == true
     inputs_targets, M_averages_values, m_averages_values = generate_inputs_targets(averages, centers, Nc; normalization=true)
@@ -190,7 +190,7 @@ else
 end
 score_clustered(x) = .- nn_clustered_cpu(Float32.([x...]))[:] ./ σ_value
 plt = Plots.plot(loss_clustered)
-savefig(plt, "figures/HOR_figures/CdV_clustered_loss.png")
+#savefig(plt, "figures/HOR_figures/CdV_clustered_loss.png")
 
 ##
 cluster_loss = check_loss(obs_uncorr[:, 1000:1000:end], nn_clustered_cpu, σ_value)
@@ -241,7 +241,7 @@ plt5 = Plots.plot!(kde_clustered_5.x, kde_clustered_5.density, label="Generated"
 plt6 = Plots.plot(kde_true_6.x, kde_true_6.density, label="Observed", xlabel="X", ylabel="Density", title="PDF 6")
 plt6 = Plots.plot!(kde_clustered_6.x, kde_clustered_6.density, label="Generated", xlabel="X", ylabel="Density")
 plt = Plots.plot(plt1, plt2, plt3, plt4, plt5, plt6, layout=(2, 3), size=(1200, 800))
-savefig(plt, "figures/HOR_figures/CdV_univariate_clustered.png")
+# savefig(plt, "figures/HOR_figures/CdV_univariate_clustered.png")
 ##
 # gr()
 # # Compute bivariate PDFs for consecutive variables
@@ -274,7 +274,7 @@ using ClustGen
 f(t) = 1.0
 
 res_trj = 1
-steps_trj = 10000000
+steps_trj = 100000
 trj = obs[:,1:res_trj:steps_trj*res_trj]
 
 ϵ = 0.01
@@ -296,7 +296,7 @@ R_num, δObs_num = zeros(4, dim_Obs, n_tau+1), zeros(4, dim_Obs, n_tau+1)
 R_lin, δObs_lin = zeros(4, dim_Obs, n_tau+1), zeros(4, dim_Obs, n_tau+1)
 R_gen, δObs_gen = zeros(4, dim_Obs, n_tau+1), zeros(4, dim_Obs, n_tau+1)
 
-R_num[1,:,:], R_num[2,:,:], R_num[3,:,:], R_num[4,:,:] = generate_numerical_response_HO(F_fast, u, dim, dt, n_tau, 1000, sigma, M; n_ens=100000, resolution=res_trj)
+R_num[1,:,:], R_num[2,:,:], R_num[3,:,:], R_num[4,:,:] = generate_numerical_response_HO(F_fast, u, dim, dt, n_tau, 1000, sigma, M; n_ens=100000, resolution=res_trj, timestepper=:rk4)
 
 for i in 1:4
     Obs(x) = x .^i
@@ -329,52 +329,52 @@ score_trj = evolve(zeros(dim), 0.01*dt, 10000000, score_gen_xt, sigma_I; timeste
 ##
 # Save the results to an HDF5 file
 
-# save_variables_to_hdf5("data/HOR_data/CdV_results_0.05-0.00001-128-300.h5", Dict(
-#     "R_num" => R_num,
-#     "R_lin" => R_lin,
-#     "R_gen" => R_gen,
-#     "S" => S,
-#     "M" => M,
-#     "obs_trj" => obs_trj,
-#     "score_trj" => score_trj,
-#     "σ_value" => σ_value,
-#     "averages" => averages,
-#     "centers" => centers,
-#     "Nc" => Nc,
-#     "kde_clustered_1_x" => [kde_clustered_1.x...],
-#     "kde_clustered_1_density" => kde_clustered_1.density,
-#     "kde_true_1_x" => [kde_true_1.x...],
-#     "kde_true_1_density" => kde_true_1.density,
-#     "kde_clustered_2_x" => [kde_clustered_2.x...],
-#     "kde_clustered_2_density" => kde_clustered_2.density,
-#     "kde_true_2_x" => [kde_true_2.x...],
-#     "kde_true_2_density" => kde_true_2.density,
-#     "kde_clustered_3_x" => [kde_clustered_3.x...],
-#     "kde_clustered_3_density" => kde_clustered_3.density,
-#     "kde_true_3_x" => [kde_true_3.x...],
-#     "kde_true_3_density" => kde_true_3.density,
-#     "kde_clustered_4_x" => [kde_clustered_4.x...],
-#     "kde_clustered_4_density" => kde_clustered_4.density,
-#     "kde_true_4_x" => [kde_true_4.x...],
-#     "kde_true_4_density" => kde_true_4.density,
-#     "kde_clustered_5_x" => [kde_clustered_5.x...],
-#     "kde_clustered_5_density" => kde_clustered_5.density,
-#     "kde_true_5_x" => [kde_true_5.x...],
-#     "kde_true_5_density" => kde_true_5.density,
-#     "kde_clustered_6_x" => [kde_clustered_6.x...],
-#     "kde_clustered_6_density" => kde_clustered_6.density,
-#     "kde_true_6_x" => [kde_true_6.x...],
-#     "kde_true_6_density" => kde_true_6.density,
-#     "dt" => dt,
-#     "Nsteps" => Nsteps,
-#     "ϵ" => ϵ,
-#     "res_trj" => res_trj,
-#     "n_tau" => n_tau
-# ))
+save_variables_to_hdf5("data/HOR_data/CdV_results_ld_0.05-0.00001-128-300_ld.h5", Dict(
+    "R_num" => R_num,
+    "R_lin" => R_lin,
+    "R_gen" => R_gen,
+    "S" => S,
+    "M" => M,
+    "obs_trj" => obs_trj,
+    "score_trj" => score_trj,
+    "σ_value" => σ_value,
+    "averages" => averages,
+    "centers" => centers,
+    "Nc" => Nc,
+    "kde_clustered_1_x" => [kde_clustered_1.x...],
+    "kde_clustered_1_density" => kde_clustered_1.density,
+    "kde_true_1_x" => [kde_true_1.x...],
+    "kde_true_1_density" => kde_true_1.density,
+    "kde_clustered_2_x" => [kde_clustered_2.x...],
+    "kde_clustered_2_density" => kde_clustered_2.density,
+    "kde_true_2_x" => [kde_true_2.x...],
+    "kde_true_2_density" => kde_true_2.density,
+    "kde_clustered_3_x" => [kde_clustered_3.x...],
+    "kde_clustered_3_density" => kde_clustered_3.density,
+    "kde_true_3_x" => [kde_true_3.x...],
+    "kde_true_3_density" => kde_true_3.density,
+    "kde_clustered_4_x" => [kde_clustered_4.x...],
+    "kde_clustered_4_density" => kde_clustered_4.density,
+    "kde_true_4_x" => [kde_true_4.x...],
+    "kde_true_4_density" => kde_true_4.density,
+    "kde_clustered_5_x" => [kde_clustered_5.x...],
+    "kde_clustered_5_density" => kde_clustered_5.density,
+    "kde_true_5_x" => [kde_true_5.x...],
+    "kde_true_5_density" => kde_true_5.density,
+    "kde_clustered_6_x" => [kde_clustered_6.x...],
+    "kde_clustered_6_density" => kde_clustered_6.density,
+    "kde_true_6_x" => [kde_true_6.x...],
+    "kde_true_6_density" => kde_true_6.density,
+    "dt" => dt,
+    "Nsteps" => Nsteps,
+    "ϵ" => ϵ,
+    "res_trj" => res_trj,
+    "n_tau" => n_tau
+))
 
 ##
 
-results = read_variables_from_hdf5("data/HOR_data/CdV_results_0.05-0.00001-128-300.h5")
+results = read_variables_from_hdf5("data/HOR_data/CdV_results_ld_0.05-0.00001-128-300_ld.h5")
 # Extract all variables from the results dictionary
 R_num = results["R_num"]
 R_lin = results["R_lin"]
@@ -480,7 +480,8 @@ for i in 1:6
         xlabelsize = 28,
         ylabelsize = 28,
         xticklabelsize = 24,
-        yticklabelsize = 24
+        yticklabelsize = 24,
+        limits = ((-6,6), nothing)  # Set x-limits
     )
     
     # Get the appropriate KDE data based on variable index
@@ -490,7 +491,7 @@ for i in 1:6
     clustered_density = eval(Symbol("kde_clustered_$(i)_density"))
     
     # Create Gaussian PDF with same x range as the true data
-    gauss_x = LinRange(minimum(true_x), maximum(true_x), 100)
+    gauss_x = LinRange(-6, 6, 100)
     gauss_y = gaussian_pdf.(gauss_x)
     
     # Scale the Gaussian to match magnitude of true PDF for better visibility
@@ -501,7 +502,7 @@ for i in 1:6
     lines!(axes[i,1], true_x, true_density, color=colors[1], linewidth=3)
     lines!(axes[i,1], gauss_x, gauss_y_scaled, color=colors[2], linewidth=3)
     lines!(axes[i,1], clustered_x, clustered_density, color=colors[3], linewidth=3)
-    
+
     # Response function plots (now in columns 2-5)
     for j in 1:4
         response_col = j + 1  # Column index in the figure (PDF is col 1)
@@ -546,7 +547,7 @@ rowgap!(fig.layout, 20)
 fig.layout[8, :] = GridLayout(height=20)
 
 # Save figure
-save("figures/HOR_figures/CdV_responses_ylims.png", fig, px_per_unit=2)  # Higher DPI for better print quality
+save("figures/HOR_figures/CdV_responses_ylims_ld.png", fig, px_per_unit=2)  # Higher DPI for better print quality
 
 fig
 
@@ -632,9 +633,9 @@ for i in 1:6
     gauss_y_scaled = gauss_y .* scale_factor
     
     # Plot PDFs
-    lines!(axes[i,1], true_x, true_density, color=colors[1], linewidth=3)
-    lines!(axes[i,1], gauss_x, gauss_y_scaled, color=colors[2], linewidth=3)
-    lines!(axes[i,1], clustered_x, clustered_density, color=colors[3], linewidth=3)
+    lines!(axes[i,1], true_x, true_density, color=colors[1], linewidth=3, xlims!=(-6,6))
+    lines!(axes[i,1], gauss_x, gauss_y_scaled, color=colors[2], linewidth=3, xlims!=(-6,6))
+    lines!(axes[i,1], clustered_x, clustered_density, color=colors[3], linewidth=3, xlims!=(-6,6))
     
     # Response function plots (now in columns 2-5)
     for j in 1:4

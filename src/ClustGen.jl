@@ -13,6 +13,7 @@ using LinearAlgebra
 using Random
 using Distributed
 using SharedArrays
+using StaticArrays
 
 # Statistics and data processing
 using Statistics
@@ -48,6 +49,7 @@ include("io.jl")                # I/O functions for saving/loading models and da
 include("diffusion_matrix.jl")  # Diffusion matrix estimation
 include("responses.jl")         # Response function generators
 include("KSE_integrate.jl")     # KSE integration functions
+include("control.jl")          # Control and optimal forcing
 
 # ===== Exported functions =====
 # Autoencoder functionality
@@ -84,6 +86,9 @@ export generate_numerical_response, generate_score_response, generate_numerical_
 # KSE integration
 export KSE_integrate, dealias, domain, field2vector, vector2field, create_ks_animation, 
        reduce_fourier_energy, reconstruct_physical_from_reduced
+
+# Control and optimal forcing
+export create_linear_interpolator, f_star, compute_M_matrix, compute_C_matrices, find_optimal_u
 
 # ===== I/O functions =====
 export save_variables_to_hdf5, read_variables_from_hdf5, save_current_workspace, 

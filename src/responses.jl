@@ -1,3 +1,310 @@
+# """
+#     generate_numerical_response_f(model, model_pert, dim, dt, n_tau, n_therm, sigma, Obs, dim_Obs; 
+#                                  n_ens=1000, resolution=1, timestepper=:rk4, use_threads=true)
+
+# Generate numerical response by comparing trajectories from perturbed and unperturbed models.
+# Optimized with parallel computation and memory-efficient accumulation.
+
+# # Arguments
+# - `model`: Original dynamical model function
+# - `model_pert`: Perturbed dynamical model function
+# - `dim`: Dimension of the state space
+# - `dt`: Time step size
+# - `n_tau`: Number of time steps for response measurement
+# - `n_therm`: Number of steps for thermalization
+# - `sigma`: Noise function
+# - `Obs`: Observable function to compute on trajectories
+# - `dim_Obs`: Dimension of the observable
+# - `n_ens`: Number of ensemble members (default: 1000)
+# - `resolution`: Save frequency for trajectories (default: 1)
+# - `timestepper`: Integration method to use (default: :rk4)
+# - `use_threads`: Whether to use thread-based parallelism (default: true)
+
+# # Returns
+# - Matrix of response differences with shape (dim_Obs, n_tau)
+# """
+# function generate_numerical_response_f(model, model_pert, dim, dt, n_tau, n_therm, sigma, Obs, dim_Obs; 
+#                                      n_ens=1000, resolution=1, timestepper=:rk4, use_threads=true)
+
+#     # Initialize arrays for accumulating results (avoid large 3D arrays)
+#     δObs_sum = zeros(dim_Obs, n_tau)
+    
+#     # Create a thread-safe progress meter
+#     prog = Progress(n_ens, desc="Computing model responses: ", barglyphs=BarGlyphs("[=> ]"))
+#     prog_lock = ReentrantLock()
+    
+#     # Determine computation method: threads or sequential
+#     if use_threads && Threads.nthreads() > 1
+#         # Parallel processing using threads
+#         Threads.@threads for i in 1:n_ens
+#             # Thread-local storage for results
+#             δObs_local = zeros(dim_Obs, n_tau)
+            
+#             # Generate unique random seed for this thread
+#             thread_seed = abs(rand(Int)) + i * 10000 + Base.Threads.threadid() * 1000000
+            
+#             # Thermalization: evolve from random initial condition
+#             X0 = evolve(randn(dim), dt, n_therm, model, sigma; 
+#                        seed=thread_seed, resolution=n_therm, timestepper=timestepper)[:,end] 
+            
+#             # New seed for response calculation
+#             response_seed = thread_seed + 1
+            
+#             # Evolve both original and perturbed models from same initial condition
+#             X = evolve(X0, dt, n_tau*resolution, model, sigma; 
+#                       seed=response_seed, resolution=resolution, timestepper=timestepper) 
+#             X_pert = evolve(X0, dt, n_tau*resolution, model_pert, sigma; 
+#                            seed=response_seed, resolution=resolution, timestepper=timestepper) 
+            
+#             # Calculate observable differences
+#             δObs_local .= Obs(X_pert) .- Obs(X)
+            
+#             # Atomically accumulate results
+#             lock(prog_lock) do
+#                 δObs_sum .+= δObs_local
+#                 next!(prog)
+#             end
+#         end
+#     else
+#         # Sequential processing
+#         for i in 1:n_ens
+#             # Generate random seed for reproducibility
+#             seed = abs(rand(Int)) + i * 10000
+            
+#             # Thermalization: evolve from random initial condition
+#             X0 = evolve(randn(dim), dt, n_therm, model, sigma; 
+#                        seed=seed, resolution=n_therm, timestepper=timestepper)[:,end] 
+            
+#             # New seed for response calculation
+#             response_seed = seed + 1
+            
+#             # Evolve both original and perturbed models from same initial condition
+#             X = evolve(X0, dt, n_tau*resolution, model, sigma; 
+#                       seed=response_seed, resolution=resolution, timestepper=timestepper) 
+#             X_pert = evolve(X0, dt, n_tau*resolution, model_pert, sigma; 
+#                            seed=response_seed, resolution=resolution, timestepper=timestepper) 
+            
+#             # Calculate observable differences and accumulate
+#             δObs_sum .+= Obs(X_pert) .- Obs(X)
+#             next!(prog)
+#         end
+#     end
+    
+#     # Compute mean by dividing by ensemble size
+#     δObs = δObs_sum ./ n_ens
+
+#     return δObs
+# end
+
+# """
+#     generate_numerical_response(model, u, dim, dt, n_tau, n_therm, sigma, Obs, dim_Obs; 
+#                                n_ens=1000, resolution=1, timestepper=:rk4, use_threads=true)
+
+# Generate numerical response by applying perturbation to initial condition with single noise source.
+# Optimized with parallel computation and memory-efficient accumulation.
+
+# # Arguments
+# - `model`: Dynamical model function
+# - `u`: Perturbation function
+# - `dim`: Dimension of the state space
+# - `dt`: Time step size
+# - `n_tau`: Number of time steps for response measurement
+# - `n_therm`: Number of steps for thermalization
+# - `sigma`: Noise function
+# - `Obs`: Observable function to compute on trajectories
+# - `dim_Obs`: Dimension of the observable
+# - `n_ens`: Number of ensemble members (default: 1000)
+# - `resolution`: Save frequency for trajectories (default: 1)
+# - `timestepper`: Integration method to use (default: :rk4)
+# - `use_threads`: Whether to use thread-based parallelism (default: true)
+
+# # Returns
+# - Matrix of response differences with shape (dim_Obs, n_tau+1)
+# """
+# function generate_numerical_response(model, u, dim, dt, n_tau, n_therm, sigma, Obs, dim_Obs; 
+#                                    n_ens=1000, resolution=1, timestepper=:rk4, use_threads=true)
+#     # Initialize arrays for accumulating results (avoid large 3D arrays)
+#     δObs_sum = zeros(dim_Obs, n_tau+1)
+    
+#     # Create a thread-safe progress meter
+#     prog = Progress(n_ens, desc="Computing responses: ", barglyphs=BarGlyphs("[=> ]"))
+#     prog_lock = ReentrantLock()
+    
+#     # Determine computation method: threads or sequential
+#     if use_threads && Threads.nthreads() > 1
+#         # Parallel processing using threads
+#         Threads.@threads for i in 1:n_ens
+#             # Thread-local storage for results
+#             δObs_local = zeros(dim_Obs, n_tau+1)
+            
+#             # Generate unique random seed for this thread
+#             thread_seed = abs(rand(Int)) + i * 10000 + Base.Threads.threadid() * 1000000
+            
+#             # Thermalization: evolve from random initial condition
+#             X0 = evolve(0.001 .* randn(dim), dt, n_therm, model, sigma; 
+#                        seed=thread_seed, resolution=n_therm, timestepper=timestepper)[:,end] 
+            
+#             # New seed for response calculation
+#             response_seed = thread_seed + 1
+            
+#             # Apply perturbation to initial condition
+#             ϵ = u(X0)
+#             X0_pert = X0 .+ ϵ
+            
+#             # Evolve both original and perturbed initial states
+#             X = evolve(X0, dt, n_tau*resolution, model, sigma; 
+#                       seed=response_seed, resolution=resolution, timestepper=timestepper) 
+#             X_pert = evolve(X0_pert, dt, n_tau*resolution, model, sigma; 
+#                            seed=response_seed, resolution=resolution, timestepper=timestepper) 
+            
+#             # Calculate observable differences
+#             δObs_local .= Obs(X_pert) .- Obs(X)
+            
+#             # Atomically accumulate results
+#             lock(prog_lock) do
+#                 δObs_sum .+= δObs_local
+#                 next!(prog)
+#             end
+#         end
+#     else
+#         # Sequential processing
+#         for i in 1:n_ens
+#             # Generate random seed for thermalization
+#             seed = abs(rand(Int)) + i * 10000
+            
+#             # Thermalization: evolve from random initial condition
+#             X0 = evolve(0.001 .* randn(dim), dt, n_therm, model, sigma; 
+#                        seed=seed, resolution=n_therm, timestepper=timestepper)[:,end] 
+            
+#             # New seed for response calculation
+#             response_seed = seed + 1
+            
+#             # Apply perturbation to initial condition
+#             ϵ = u(X0)
+#             X0_pert = X0 .+ ϵ
+            
+#             # Evolve both original and perturbed initial states
+#             X = evolve(X0, dt, n_tau*resolution, model, sigma; 
+#                       seed=response_seed, resolution=resolution, timestepper=timestepper) 
+#             X_pert = evolve(X0_pert, dt, n_tau*resolution, model, sigma; 
+#                            seed=response_seed, resolution=resolution, timestepper=timestepper) 
+            
+#             # Calculate observable differences and accumulate
+#             δObs_sum .+= Obs(X_pert) .- Obs(X)
+#             next!(prog)
+#         end
+#     end
+    
+#     # Compute mean by dividing by ensemble size
+#     δObs = δObs_sum ./ n_ens
+#     return δObs
+# end
+
+# """
+#     generate_numerical_response(model, u, dim, dt, n_tau, n_therm, sigma1, sigma2, Obs, dim_Obs; 
+#                                n_ens=1000, resolution=1, timestepper=:rk4, use_threads=true)
+
+# Generate numerical response by applying perturbation to initial condition with two noise sources.
+# Optimized with parallel computation and memory-efficient accumulation.
+
+# # Arguments
+# - `model`: Dynamical model function
+# - `u`: Perturbation function
+# - `dim`: Dimension of the state space
+# - `dt`: Time step size
+# - `n_tau`: Number of time steps for response measurement
+# - `n_therm`: Number of steps for thermalization
+# - `sigma1`: First noise function
+# - `sigma2`: Second noise function
+# - `Obs`: Observable function to compute on trajectories
+# - `dim_Obs`: Dimension of the observable
+# - `n_ens`: Number of ensemble members (default: 1000)
+# - `resolution`: Save frequency for trajectories (default: 1)
+# - `timestepper`: Integration method to use (default: :rk4)
+# - `use_threads`: Whether to use thread-based parallelism (default: true)
+
+# # Returns
+# - Matrix of response differences with shape (dim_Obs, n_tau+1)
+# """
+# function generate_numerical_response(model, u, dim, dt, n_tau, n_therm, sigma1, sigma2, Obs, dim_Obs; 
+#                                    n_ens=1000, resolution=1, timestepper=:rk4, use_threads=true)
+#     # Initialize arrays for accumulating results (avoid large 3D arrays)
+#     δObs_sum = zeros(dim_Obs, n_tau+1)
+    
+#     # Create a thread-safe progress meter
+#     prog = Progress(n_ens, desc="Computing dual-noise responses: ", barglyphs=BarGlyphs("[=> ]"))
+#     prog_lock = ReentrantLock()
+    
+#     # Determine computation method: threads or sequential
+#     if use_threads && Threads.nthreads() > 1
+#         # Parallel processing using threads
+#         Threads.@threads for i in 1:n_ens
+#             # Thread-local storage for results
+#             δObs_local = zeros(dim_Obs, n_tau+1)
+            
+#             # Generate unique random seed for this thread
+#             thread_seed = abs(rand(Int)) + i * 10000 + Base.Threads.threadid() * 1000000
+            
+#             # Thermalization: evolve from random initial condition with two noise sources
+#             X0 = evolve(randn(dim), dt, n_therm, model, sigma1, sigma2; 
+#                        seed=thread_seed, resolution=n_therm, timestepper=timestepper)[:,end] 
+            
+#             # New seed for response calculation
+#             response_seed = thread_seed + 1
+            
+#             # Apply perturbation to initial condition
+#             ϵ = u(X0)
+#             X0_pert = X0 .+ ϵ
+            
+#             # Evolve both original and perturbed initial states with two noise sources
+#             X = evolve(X0, dt, n_tau*resolution, model, sigma1, sigma2; 
+#                       seed=response_seed, resolution=resolution, timestepper=timestepper) 
+#             X_pert = evolve(X0_pert, dt, n_tau*resolution, model, sigma1, sigma2; 
+#                            seed=response_seed, resolution=resolution, timestepper=timestepper) 
+            
+#             # Calculate observable differences
+#             δObs_local .= Obs(X_pert) .- Obs(X)
+            
+#             # Atomically accumulate results
+#             lock(prog_lock) do
+#                 δObs_sum .+= δObs_local
+#                 next!(prog)
+#             end
+#         end
+#     else
+#         # Sequential processing
+#         for i in 1:n_ens
+#             # Generate random seed for thermalization
+#             seed = abs(rand(Int)) + i * 10000
+            
+#             # Thermalization: evolve from random initial condition with two noise sources
+#             X0 = evolve(randn(dim), dt, n_therm, model, sigma1, sigma2; 
+#                        seed=seed, resolution=n_therm, timestepper=timestepper)[:,end] 
+            
+#             # New seed for response calculation
+#             response_seed = seed + 1
+            
+#             # Apply perturbation to initial condition
+#             ϵ = u(X0)
+#             X0_pert = X0 .+ ϵ
+            
+#             # Evolve both original and perturbed initial states with two noise sources
+#             X = evolve(X0, dt, n_tau*resolution, model, sigma1, sigma2; 
+#                       seed=response_seed, resolution=resolution, timestepper=timestepper) 
+#             X_pert = evolve(X0_pert, dt, n_tau*resolution, model, sigma1, sigma2; 
+#                            seed=response_seed, resolution=resolution, timestepper=timestepper) 
+            
+#             # Calculate observable differences and accumulate
+#             δObs_sum .+= Obs(X_pert) .- Obs(X)
+#             next!(prog)
+#         end
+#     end
+    
+#     # Compute mean by dividing by ensemble size
+#     δObs = δObs_sum ./ n_ens
+#     return δObs
+# end
+
 """
     generate_numerical_response_f(model, model_pert, dim, dt, n_tau, n_therm, sigma, Obs, dim_Obs; n_ens=1000, resolution=1)
 

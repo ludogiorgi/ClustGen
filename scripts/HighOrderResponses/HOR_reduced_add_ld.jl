@@ -38,16 +38,6 @@ function score_true(x; F_tilde=F_tilde)
     return [2 * (F_tilde + a*u + b*u^2 - c*u^3) / (s^2)]
 end
 
-# function p0(u; F_tilde=F_tilde)
-#     return [2 * (F_tilde + a*u^2/2 + b*u^3/3 - c*u^4/4) / (s^2)]
-# end
-
-# function N0(p0, m, M; F_tilde=F_tilde)
-#     # Compute the integral of p0(x) from m to M
-#     result, error = quadgk(x -> p0([x]; F_tilde=F_tilde)[1], m, M, rtol=1e-8)
-#     return result
-# end
-
 function normalize_f(f, x, M, S)
     return (f(x .* S .+ M) .* S)[:]
 end
@@ -58,7 +48,7 @@ end
 
 dim = 1
 dt = 0.01
-Nsteps = 100000000
+Nsteps = 1000000
 obs_nn = evolve([0.0], dt, Nsteps, F, sigma; timestepper=:rk4, resolution=10)
 M = mean(obs_nn, dims=2)
 S = std(obs_nn, dims=2)
@@ -66,7 +56,7 @@ obs = (obs_nn .- M) ./ S
 
 autocov_obs = zeros(dim, 300)
 for i in 1:dim
-    autocov_obs[i,:] = autocovariance(obs[i,1:1000000]; timesteps=300)
+    autocov_obs[i,:] = autocovariance(obs[i,1:100000]; timesteps=300)
 end
 
 kde_obs = kde(obs[200:end])
@@ -93,7 +83,7 @@ end
 normalization = false
 σ_value = 0.05
 
-averages, averages_residual, centers, Nc, ssp = f_tilde_ssp(σ_value, obs_uncorr; prob=0.002, do_print=true, conv_param=0.1, normalization=normalization)
+averages, averages_residual, centers, Nc, ssp = f_tilde_ssp(σ_value, obs_uncorr; prob=0.002, do_print=true, conv_param=0.001, normalization=normalization)
 
 if normalization == true
     inputs_targets, M_averages_values, m_averages_values = generate_inputs_targets(averages, centers, Nc; normalization=true)
@@ -155,7 +145,7 @@ f(t) = 1.0
 score_gen(x) = score_clustered(x)
 
 res_trj = 5
-steps_trj = 2000000
+steps_trj = 20000
 trj = obs[:,1:res_trj:steps_trj*res_trj]
 
 ϵ = 1.0
@@ -486,7 +476,7 @@ rowgap!(fig.layout, 20)
 fig.layout[3, :] = GridLayout(height=20)
 
 # Save figure
-save("figures/HOR_figures/reduced_responses.png", fig, px_per_unit=2)  # Higher DPI for better print quality
+save("figures/HOR_figures/reduced_responses_ld.png", fig, px_per_unit=2)  # Higher DPI for better print quality
 
 fig
 
@@ -578,7 +568,7 @@ Legend(fig[3, 1:4],
     [LineElement(color=c, linewidth=lw, linestyle=ls) 
      for (c, lw, ls) in zip(colors, linewidths, linestyles)] 
     ∪ [LineElement(color=:green, linewidth=linewidth-1, linestyle=:dash)],
-    ["Analytic", "Gaussian", "KGMM", "Perturbed", "Unperturbed"],
+    ["Analytic", "Linear", "KGMM", "Perturbed", "Unperturbed"],
     "Methods",
     orientation = :horizontal,
     titlesize = 32,
@@ -606,72 +596,70 @@ fig
 
 
 ##
-# # Save all variables needed for the GLMakie plots
-# save_variables_to_hdf5("data/HOR_data/reduced_add_analysis.h5", Dict(
-#     # Simulation parameters
-#     "dt" => dt,
-#     "res_trj" => res_trj,
-#     "n_tau" => n_tau,
-#     "n_moments" => n_moments,
-#     "M" => M,
-#     "S" => S,
+# Save all variables needed for the GLMakie plots
+save_variables_to_hdf5("data/HOR_data/reduced_add_analysis_ld.h5", Dict(
+    # Simulation parameters
+    "dt" => dt,
+    "res_trj" => res_trj,
+    "n_tau" => n_tau,
+    "n_moments" => n_moments,
+    "M" => M,
+    "S" => S,
     
-#     # Response functions
-#     "R_true" => R_true,
-#     "R_lin" => R_lin,
-#     "R_gen" => R_gen,
-#     "R_gen_c" => R_gen_c,
+    # Response functions
+    "R_true" => R_true,
+    "R_lin" => R_lin,
+    "R_gen" => R_gen,
+    "R_gen_c" => R_gen_c,
     
-#     # Convolution results
-#     "F_true" => F_true,
-#     "F_lin" => F_lin,
-#     "F_gen" => F_gen,
+    # Convolution results
+    "F_true" => F_true,
+    "F_lin" => F_lin,
+    "F_gen" => F_gen,
     
-#     # Clustering results
-#     "averages" => averages,
-#     "centers" => centers,
-#     "Nc" => Nc,
-#     "σ_value" => σ_value,
+    # Clustering results
+    "averages" => averages,
+    "centers" => centers,
+    "Nc" => Nc,
+    "σ_value" => σ_value,
     
-#     # Moments analysis
-#     "moments_pert" => moments_pert,
-#     "moments_true" => moments_true,
-#     "moments_gen" => moments_gen,
-#     "moments_lin" => moments_lin,
-#     "ϵ_vals" => ϵ_vals,
+    # Moments analysis
+    "moments_pert" => moments_pert,
+    "moments_true" => moments_true,
+    "moments_gen" => moments_gen,
+    "moments_lin" => moments_lin,
+    "ϵ_vals" => ϵ_vals,
     
-#     # PDF data
-#     "pdf_obs" => pdf_obs,
-#     "pdf_kgmm" => pdf_kgmm,
-#     "pdf_unpert" => pdf_unpert,
-#     "xax" => xax,
+    # PDF data
+    "pdf_obs" => pdf_obs,
+    "pdf_kgmm" => pdf_kgmm,
+    "pdf_unpert" => pdf_unpert,
+    "xax" => xax,
     
-#     # PDFs at different perturbation values
-#     "pdf_pert" => hcat([pdf_pert[i] for i in 1:length(pdf_pert)]...),
-#     "pdf_true" => hcat([pdf_true[i] for i in 1:length(pdf_true)]...),
-#     "pdf_gen" => hcat([pdf_gen[i] for i in 1:length(pdf_gen)]...),
-#     "pdf_lin" => hcat([pdf_lin[i] for i in 1:length(pdf_lin)]...),
+    # PDFs at different perturbation values
+    "pdf_pert" => hcat([pdf_pert[i] for i in 1:length(pdf_pert)]...),
+    "pdf_true" => hcat([pdf_true[i] for i in 1:length(pdf_true)]...),
+    "pdf_gen" => hcat([pdf_gen[i] for i in 1:length(pdf_gen)]...),
+    "pdf_lin" => hcat([pdf_lin[i] for i in 1:length(pdf_lin)]...),
     
-#     # Perturbation parameters
-#     "ϵs" => ϵs,
-#     "orders" => orders,
-#     "orders_lin" => orders_lin,
+    # Perturbation parameters
+    "ϵs" => ϵs,
+    "orders" => orders,
+    "orders_lin" => orders_lin,
     
-#     # Model parameters
-#     "a" => a,
-#     "b" => b,
-#     "c" => c,
-#     "F_tilde" => F_tilde,
-#     "s" => s,
-#     "p_inf" => p_inf,
-#     "m_inf" => m_inf
-# ))
+    # Model parameters
+    "a" => a,
+    "b" => b,
+    "c" => c,
+    "F_tilde" => F_tilde,
+    "s" => s
+))
 
 
 ##
 
 # Load the saved data
-results = read_variables_from_hdf5("data/HOR_data/reduced_add_analysis.h5")
+results = read_variables_from_hdf5("data/HOR_data/reduced_add_analysis_ld.h5")
 
 # Extract all variables from the results dictionary
 R_true = results["R_true"]

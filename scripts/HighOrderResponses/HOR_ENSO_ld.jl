@@ -30,7 +30,7 @@ end
 
 dim = 3
 dt = 0.01
-Nsteps = 100000000
+Nsteps = 1000000
 obs_nn = evolve([0.0, 0.0, 0.0], dt, Nsteps, F, sigma; resolution = 10)
 M = mean(obs_nn, dims=2)
 S = std(obs_nn, dims=2)
@@ -56,7 +56,7 @@ Plots.scatter(obs_uncorr[1,1:10000], obs_uncorr[2,1:10000], obs_uncorr[3,1:10000
 normalization = false
 σ_value = 0.05
 
-averages, centers, Nc, ssp = f_tilde_ssp(σ_value, obs_uncorr; prob=0.0001, do_print=true, conv_param=0.002, normalization=normalization)
+averages, centers, Nc, ssp = f_tilde_ssp(σ_value, obs_uncorr; prob=0.0001, do_print=true, conv_param=0.001, normalization=normalization)
 
 if normalization == true
     inputs_targets, M_averages_values, m_averages_values = generate_inputs_targets(averages, centers, Nc; normalization=true)
@@ -64,9 +64,9 @@ else
     inputs_targets = generate_inputs_targets(averages, centers, Nc; normalization=false)
 end
 
-plotly()
-targets_norm = [norm(averages[:,i]) for i in eachindex(centers[1,:])]
-Plots.scatter(centers[1,:], centers[2,:], centers[3,:], marker_z=targets_norm, color=:viridis)
+# plotly()
+# targets_norm = [norm(averages[:,i]) for i in eachindex(centers[1,:])]
+# Plots.scatter(centers[1,:], centers[2,:], centers[3,:], marker_z=targets_norm, color=:viridis)
 ##
 #################### TRAINING WITH CLUSTERING LOSS ####################
 
@@ -82,13 +82,11 @@ Plots.plot(loss_clustered)
 ##
 #################### NN SAVINGS ####################
 
-BSON.@save pwd() * "/data/HOR_data/nn_ENSO.bson" nn_clustered_cpu
+BSON.@save pwd() * "/data/HOR_data/nn_ENSO_ld.bson" nn_clustered_cpu
 ##
 #################### NN LOADINGS ####################
 
-BSON.load(pwd() * "/data/HOR_data/nn_ENSO.bson")[:nn_clustered_cpu]
-
-##
+BSON.load(pwd() * "/data/HOR_data/nn_ENSO_ld.bson")[:nn_clustered_cpu]
 
 
 ##
@@ -144,7 +142,7 @@ using ClustGen
 f(t) = 1.0
 
 res_trj = 2
-steps_trj = 1000000
+steps_trj = 10000
 trj = obs[:,1:res_trj:steps_trj*res_trj]
 
 ϵ = 0.01
@@ -161,15 +159,15 @@ score_gen(x) = score_clustered(x)
 dim_Obs = 3
 n_tau = 50
 
-# R_num, δObs_num = zeros(4, dim, n_tau+1), zeros(4, dim, n_tau+1)
-# R_lin, δObs_lin = zeros(4, dim, n_tau+1), zeros(4, dim, n_tau+1)
+R_num, δObs_num = zeros(4, dim, n_tau+1), zeros(4, dim, n_tau+1)
+R_lin, δObs_lin = zeros(4, dim, n_tau+1), zeros(4, dim, n_tau+1)
 R_gen, δObs_gen = zeros(4, dim, n_tau+1), zeros(4, dim, n_tau+1)
 
-# R_num[1,:,:], R_num[2,:,:], R_num[3,:,:], R_num[4,:,:] = generate_numerical_response_HO(F, u, dim, dt, n_tau, 600, sigma, M; n_ens=100000, resolution=10*res_trj, timestepper=:rk4)
+R_num[1,:,:], R_num[2,:,:], R_num[3,:,:], R_num[4,:,:] = generate_numerical_response_HO(F, u, dim, dt, n_tau, 600, sigma, M; n_ens=100000, resolution=10*res_trj, timestepper=:rk4)
 
 for i in 1:4
     Obs(x) = x.^i
-    # R_lin[i,:,:], δObs_lin[i,:,:] = generate_score_response(trj, u, div_u, f, score_qG, res_trj*dt, n_tau, Obs, dim_Obs)
+    R_lin[i,:,:], δObs_lin[i,:,:] = generate_score_response(trj, u, div_u, f, score_qG, res_trj*dt, n_tau, Obs, dim_Obs)
     R_gen[i,:,:], δObs_gen[i,:,:] = generate_score_response(trj, u, div_u, f, score_gen, res_trj*dt, n_tau, Obs, dim_Obs)
 end
 
@@ -413,67 +411,67 @@ fig.layout[5, :] = GridLayout(height=20)
 mkpath("figures/HOR_figures")
 
 # Save figure
-save("figures/HOR_figures/ENSO_responses.png", fig, px_per_unit=2)
+save("figures/HOR_figures/ENSO_responses_ld.png", fig, px_per_unit=2)
 
 fig
 
 ##
 
-# # Save all relevant variables for the ENSO responses figure
-# # Make sure the directory exists
-# mkpath("data/HOR_data")
+# Save all relevant variables for the ENSO responses figure
+# Make sure the directory exists
+mkpath("data/HOR_data")
 
-# # Create dictionary with all the variables needed for the plot
-# data_to_save = Dict(
-#     # Response functions
-#     "R_gen_hack" => R_gen_hack,
-#     "R_lin" => R_lin,
-#     "R_num" => R_num,
+# Create dictionary with all the variables needed for the plot
+data_to_save = Dict(
+    # Response functions
+    "R_gen_hack" => R_gen_hack,
+    "R_lin" => R_lin,
+    "R_num" => R_num,
     
-#     # PDF data for each dimension
-#     # X dimension
-#     "kde_true_x_x" => kde_true_x_x,
-#     "kde_true_x_y" => kde_true_x_y,
-#     "kde_clustered_x_x" => kde_clustered_x_x,
-#     "kde_clustered_x_y" => kde_clustered_x_y,
-#     "kde_gauss_x" => kde_gauss_x,
+    # PDF data for each dimension
+    # X dimension
+    "kde_true_x_x" => kde_true_x_x,
+    "kde_true_x_y" => kde_true_x_y,
+    "kde_clustered_x_x" => kde_clustered_x_x,
+    "kde_clustered_x_y" => kde_clustered_x_y,
+    "kde_gauss_x" => kde_gauss_x,
     
-#     # Y dimension
-#     "kde_true_y_x" => kde_true_y_x,
-#     "kde_true_y_y" => kde_true_y_y,
-#     "kde_clustered_y_x" => kde_clustered_y_x, 
-#     "kde_clustered_y_y" => kde_clustered_y_y,
-#     "kde_gauss_y" => kde_gauss_y,
+    # Y dimension
+    "kde_true_y_x" => kde_true_y_x,
+    "kde_true_y_y" => kde_true_y_y,
+    "kde_clustered_y_x" => kde_clustered_y_x, 
+    "kde_clustered_y_y" => kde_clustered_y_y,
+    "kde_gauss_y" => kde_gauss_y,
     
-#     # Z dimension
-#     "kde_true_z_x" => kde_true_z_x,
-#     "kde_true_z_y" => kde_true_z_y,
-#     "kde_clustered_z_x" => kde_clustered_z_x,
-#     "kde_clustered_z_y" => kde_clustered_z_y,
-#     "kde_gauss_z" => kde_gauss_z,
+    # Z dimension
+    "kde_true_z_x" => kde_true_z_x,
+    "kde_true_z_y" => kde_true_z_y,
+    "kde_clustered_z_x" => kde_clustered_z_x,
+    "kde_clustered_z_y" => kde_clustered_z_y,
+    "kde_gauss_z" => kde_gauss_z,
     
-#     # Model parameters
-#     "S" => S,
-#     "M" => M,
+    # Model parameters
+    "S" => S,
+    "M" => M,
     
-#     # Requested variables
-#     "centers" => centers,
-#     "averages" => averages,
-#     "Nc" => Nc,
+    # Requested variables
+    "centers" => centers,
+    "averages" => averages,
+    "Nc" => Nc,
     
-#     # Time parameters
-#     "dt" => dt,
-#     "res_trj" => res_trj,
-#     "n_tau" => n_tau
-# )
+    # Time parameters
+    "dt" => dt,
+    "res_trj" => res_trj,
+    "n_tau" => n_tau
+)
 
-# # Save all data using the existing function
-# save_variables_to_hdf5("data/HOR_data/ENSO_responses_data.h5", data_to_save)
+# Save all data using the existing function
+save_variables_to_hdf5("data/HOR_data/ENSO_responses_data_ld.h5", data_to_save)
 
 ##
 
 # Load the ENSO response data using the existing function
-results = read_variables_from_hdf5("data/HOR_data/ENSO_responses_data.h5")
+results = read_variables_from_hdf5("data/HOR_data/ENSO_responses_data_ld.h5")
 
 # Extract all variables from the results dictionary
 R_gen_hack = results["R_gen_hack"]
@@ -515,3 +513,6 @@ Nc = results["Nc"]
 dt = results["dt"]
 res_trj = results["res_trj"]
 n_tau = results["n_tau"]
+
+
+

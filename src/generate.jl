@@ -44,7 +44,8 @@ Adds scaled Gaussian noise to state vector using scalar or vector diffusion coef
 - `σ`: Noise amplitude (scalar or vector)
 - `dim`: Dimension of state space
 """
-function add_noise!(u, dt, σ::Union{Real,Vector}, dim)
+function add_noise!(u, dt, σ::Union{Real,Vector})
+    dim = length(u)
     u .+= sqrt(2dt) .* σ .* randn(dim)
 end
 
@@ -59,7 +60,8 @@ Adds correlated Gaussian noise to state vector using matrix diffusion coefficien
 - `σ`: Matrix diffusion coefficient
 - `dim`: Dimension of state space
 """
-function add_noise!(u, dt, σ::Matrix, dim)
+function add_noise!(u, dt, σ::Matrix)
+    dim = size(σ, 2)
     u .+= sqrt(2dt) .* (σ * randn(dim))
 end
 
@@ -119,7 +121,7 @@ function evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:r
                 timestepper(u, dt, f, t)
                 
                 # Add stochastic component
-                add_noise!(u, dt, sig, dim)
+                add_noise!(u, dt, sig)
                 
                 # Update time
                 t += dt
@@ -141,7 +143,7 @@ function evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:r
                 timestepper(u, dt, f, t)
                 
                 # Add stochastic component
-                add_noise!(u, dt, sig, dim)
+                add_noise!(u, dt, sig)
                 
                 # Update time
                 t += dt
@@ -232,8 +234,8 @@ function evolve(u0, dt, Nsteps, f, sigma1, sigma2; seed=123, resolution=1, times
             timestepper(u, dt, f, t)
             
             # Add stochastic components from both noise sources
-            add_noise!(u, dt, sig1, dim)
-            add_noise!(u, dt, sig2, dim)
+            add_noise!(u, dt, sig1)
+            add_noise!(u, dt, sig2)
             
             # Update time
             t += dt
@@ -359,7 +361,7 @@ function evolve_ens(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timesteppe
                 timestepper_fn(u, dt, f, t)
                 
                 # Add stochastic component
-                add_noise!(u, dt, sig, dim)
+                add_noise!(u, dt, sig)
                 
                 # Update time
                 t += dt
@@ -381,7 +383,7 @@ function evolve_ens(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timesteppe
                 timestepper_fn(u, dt, f, t)
                 
                 # Add stochastic component
-                add_noise!(u, dt, sig, dim)
+                add_noise!(u, dt, sig)
                 
                 # Update time
                 t += dt
@@ -482,8 +484,8 @@ function evolve_ens(u0, dt, Nsteps, f, sigma1, sigma2; seed=123, resolution=1, t
             timestepper_fn(u, dt, f, t)
             
             # Add stochastic components from both noise sources
-            add_noise!(u, dt, sig1, dim)
-            add_noise!(u, dt, sig2, dim)
+            add_noise!(u, dt, sig1)
+            add_noise!(u, dt, sig2)
             
             # Update time
             t += dt

@@ -60,11 +60,17 @@ function generate_data_t(obs, σ; ϵ=0.05)
     # Generate noisy samples and time values
     t, x, z = generate_txz(obs', σ, ϵ=ϵ)
     
-    # Format inputs by appending time to each feature vector
-    inputs = hcat([[x[i, :]..., t[i]] for i in 1:size(obs, 2)]...)
+    # Pre-allocate arrays for better performance
+    n_samples, n_dims = size(obs, 2), size(obs, 1)
+    inputs = Matrix{Float32}(undef, n_dims + 1, n_samples)
+    targets = Matrix{Float32}(undef, n_dims, n_samples)
     
-    # Format targets (noise vectors)
-    targets = hcat([z[i, :] for i in 1:size(obs, 2)]...)
+    # Fill arrays efficiently
+    for i in 1:n_samples
+        inputs[1:n_dims, i] .= x[i, :]
+        inputs[n_dims + 1, i] = t[i]
+        targets[:, i] .= z[i, :]
+    end
     
     return inputs, targets
 end
@@ -85,9 +91,16 @@ function generate_data(obs, σ)
     # Generate noisy samples
     x, z = generate_xz(obs', σ)
     
-    # Format inputs and targets
-    inputs = hcat([[x[i, :]...] for i in 1:size(obs, 2)]...)
-    targets = hcat([z[i, :] for i in 1:size(obs, 2)]...)
+    # Pre-allocate arrays for better performance
+    n_samples, n_dims = size(obs, 2), size(obs, 1)
+    inputs = Matrix{Float32}(undef, n_dims, n_samples)
+    targets = Matrix{Float32}(undef, n_dims, n_samples)
+    
+    # Fill arrays efficiently
+    for i in 1:n_samples
+        inputs[:, i] .= x[i, :]
+        targets[:, i] .= z[i, :]
+    end
     
     return inputs, targets
 end
@@ -183,6 +196,9 @@ function train(obs, n_epochs, batch_size, neurons::Vector{Int}, σ;
     # Create model and move to device
     nn = create_nn(neurons, activation=activation, last_activation=last_activation) |> device
     
+    # Set up optimizer state using modern Flux API
+    opt_state = Flux.setup(opt, nn)
+    
     # Initialize loss history
     losses = []
     
@@ -204,16 +220,70 @@ function train(obs, n_epochs, batch_size, neurons::Vector{Int}, σ;
             batch_inputs = batch_inputs |> device
             batch_targets = batch_targets |> device
             
-            # Compute gradients
-            gs = Flux.gradient(() -> loss_score(nn, batch_inputs, batch_targets), Flux.params(nn))
-            
-            # Update parameters
-            for (param, grad) in zip(Flux.params(nn), gs)
-                Flux.Optimisers.update!(opt, param, grad)
+            # Compute gradients and loss using modern API
+            loss, grads = Flux.withgradient(nn) do m
+                loss_score(m, batch_inputs, batch_targets)
             end
             
+            # Update parameters using modern API
+            Flux.update!(opt_state, nn, grads[1])
+            
             # Accumulate loss
-            epoch_loss += loss_score(nn, batch_inputs, batch_targets)
+            epoch_loss += loss
+        end
+        
+        # Record average loss for this epoch
+        push!(losses, epoch_loss / length(data_loader))
+    end
+    
+    return nn, losses
+end
+
+function train(obs, n_epochs, batch_size, neurons::Vector{Int}, σ, time_dim; 
+               opt=Flux.Adam(0.001), activation=swish, last_activation=identity, 
+               ϵ=0.05, use_gpu=true)
+    
+    # Setup compute device
+    device = (use_gpu && CUDA.functional()) ? gpu : cpu
+    println("Using $(device === gpu ? "GPU" : "CPU")")
+    
+    # Create model and move to device
+    nn = create_nn(neurons, activation=activation, last_activation=last_activation) |> device
+    
+    # Set up optimizer state using modern Flux API
+    opt_state = Flux.setup(opt, nn)
+    
+    # Initialize loss history
+    losses = []
+    
+    # Training loop
+    for epoch in ProgressBar(1:n_epochs) 
+        # Generate batch data based on sampling method
+        if isa(σ, Float64)      # Langevin sampling method
+            inputs, targets = generate_data(obs, σ)
+        else                    # Reverse sampling method
+            inputs, targets = generate_data_t(obs, σ, ϵ=ϵ)
+        end
+        
+        # Create data loader
+        data_loader = Flux.DataLoader((inputs, targets[time_dim+1:end, :]), batchsize=batch_size, shuffle=true) 
+        epoch_loss = 0.0
+        
+        # Mini-batch updates
+        for (batch_inputs, batch_targets) in data_loader
+            batch_inputs = batch_inputs |> device
+            batch_targets = batch_targets |> device
+            
+            # Compute gradients and loss using modern API
+            loss, grads = Flux.withgradient(nn) do m
+                loss_score(m, batch_inputs, batch_targets)
+            end
+            
+            # Update parameters using modern API
+            Flux.update!(opt_state, nn, grads[1])
+            
+            # Accumulate loss
+            epoch_loss += loss
         end
         
         # Record average loss for this epoch
@@ -251,6 +321,9 @@ function train(obs, n_epochs, batch_size, nn::Chain, σ;
     # Move model to device
     nn = nn |> device
     
+    # Set up optimizer state using modern Flux API
+    opt_state = Flux.setup(opt, nn)
+    
     # Initialize loss history
     losses = []
     
@@ -272,16 +345,16 @@ function train(obs, n_epochs, batch_size, nn::Chain, σ;
             batch_inputs = batch_inputs |> device
             batch_targets = batch_targets |> device
             
-            # Compute gradients
-            gs = Flux.gradient(() -> loss_score(nn, batch_inputs, batch_targets), Flux.params(nn))
-            
-            # Update parameters
-            for (param, grad) in zip(Flux.params(nn), gs)
-                Flux.Optimisers.update!(opt, param, grad)
+            # Compute gradients and loss using modern API
+            loss, grads = Flux.withgradient(nn) do m
+                loss_score(m, batch_inputs, batch_targets)
             end
             
+            # Update parameters using modern API
+            Flux.update!(opt_state, nn, grads[1])
+            
             # Accumulate loss
-            epoch_loss += loss_score(nn, batch_inputs, batch_targets)
+            epoch_loss += loss
         end
         
         # Record average loss for this epoch
@@ -325,12 +398,14 @@ function train(obs, n_epochs, batch_size, neurons;
     # Initialize loss history
     losses = []
     
+    # Convert to Float32 once before training loop
+    inputs, targets = obs
+    inputs = Float32.(inputs)
+    targets = Float32.(targets)
+    
     # Training loop
     for epoch in ProgressBar(1:n_epochs) 
-        # Unpack pre-clustered inputs and targets
-        inputs, targets = obs
-        
-        # Create data loader
+        # Create data loader (data already converted to Float32)
         data_loader = Flux.DataLoader((inputs, targets), batchsize=batch_size, shuffle=true) 
         epoch_loss = 0.0
         
