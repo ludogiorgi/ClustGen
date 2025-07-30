@@ -519,7 +519,7 @@ Adds chaotic noise to state vector using matrix diffusion coefficient.
 """
 
 function add_y2!(u, dt, σ::Matrix, y2_t)
-    u .+= sqrt(2dt) .* (σ * y2_t)
+    u .+= sqrt(2*dt) .* (σ * y2_t)
 end
 
 """ 
@@ -528,7 +528,7 @@ version of add_noise with scalar sigma
 """
 
 function add_y2!(u, dt, σ::Real, y2_t)
-    u .+= sqrt(2 * dt) * σ .* y2_t
+    u .+= sqrt(2*dt) * (σ .* y2_t)
 end
 """
     evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:rk4, boundary=false)

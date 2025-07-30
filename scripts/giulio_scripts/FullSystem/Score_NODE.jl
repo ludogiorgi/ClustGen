@@ -71,10 +71,10 @@ end
 
 
 #==================== DELAY EMBEDDING ====================#
-function delay_embedding(x; τ, m)
+function delay_embedding_diff(x; τ, m)
     q = round(Int, τ / dt)
     start_idx = 1 + (m - 1) * q
-    Z = [ [x[i - j*q] for j in 0:m-1] for i in start_idx:length(x) ]
+    Z = [ [x[i]; [x[i - j*q] - x[i] for j in 1:m-1]] for i in start_idx:length(x) ]
     Z = hcat(Z...)  # shape (m, T)
     return reverse(Z, dims=1)  # inverti l'ordine delle righe
 end
@@ -98,39 +98,67 @@ function create_nn(layers::Vector{Int}; activation_hidden=swish, activation_outp
 end
 
 #==================== NODE ROLLOUT ====================#
-function dudt_full!(du, u, p, t)
-    score_vec = [score_clustered_xt(u_i, Φ) for u_i in u]
-    residual = re(p)(u)                   # Vector{Float32} of length m
-    du .= score_vec .+ residual           # m-dimensional ODE
+# function dudt_full!(du, u, p, t)
+#     score_vec = score_clustered_xt(u[1], Φ)
+#     residual = re(p)(u)                   # Vector{Float32} dimensionality 1
+#     du[1] = score_vec + residual           #  1D ODE
+# end
+function dudt_full!(du, u, p, z)
+    score = score_clustered_xt(u[1], Φ)
+    residual = re(p)(z)   # NODE takes delay embedding as input     
+    du = score + residual
 end
 
 
 #==================== PREDICTION FUNCTION ====================#
-function predict_full_dynamics(u0, p, tspan, t)
-    prob = ODEProblem(dudt_full!, u0, tspan, p)
+# function predict_full_dynamics(u0, p, tspan, t)
+#     prob = ODEProblem(dudt_full!, u0, tspan, p)
+#     sol = solve(prob, Tsit5(), saveat=t, sensealg=InterpolatingAdjoint(autojacvec=ZygoteVJP()))
+#     return hcat(sol.u...)
+# end
+
+function predict_full_dynamics(u0, p, tspan, t, z_seq)
+    function dudt_wrapper!(du, u, p, t)
+        k = clamp(round(Int, t / dt) + 1, 1, size(z_seq, 2))  # indice temporale sicuro
+        dudt_full!(du, u, p, z_seq[:, k])
+    end
+    prob = ODEProblem(dudt_wrapper!, u0, tspan, p)
     sol = solve(prob, Tsit5(), saveat=t, sensealg=InterpolatingAdjoint(autojacvec=ZygoteVJP()))
     return hcat(sol.u...)
 end
 
+
+
 #==================== LOSS ====================#
+# function loss_neuralode(p)
+#     loss = 0.0f0
+#     for i in 1:100
+#         u = data_sample[rand(1:length(data_sample))]
+#         pred = predict_full_dynamics(u[:, 1], p, tspan, t)
+#         loss += sum(abs2, (u[1,:] .- pred[1:end]))
+#     end
+#     return loss / 100
+# end
+
 function loss_neuralode(p)
     loss = 0.0f0
     for i in 1:100
-        u = data_sample[rand(1:length(data_sample))]
-        pred = predict_full_dynamics(u[:, 1], p, tspan, t)
-        loss += sum(abs2, (u[:, 1:end-1] .- pred[:, 1:end]))
+        u = data_sample[rand(1:end)]         # u ∈ ℝ^{m × (n_steps + 1)}
+        z_seq = u[:, 1:end-1]                # delay embeddings usati durante integrazione
+        x_true = u[1, 2:end]                 # ground truth x(t₁), ..., x(tₙ)
+        pred = predict_full_dynamics([u[1,1]], p, tspan, t, z_seq)
+        loss += sum(abs2, x_true .- pred[1, :])
     end
     return loss / 100
 end
-
 #========== MAIN ==========#
 
 # ------------------------
 # 1. Model definition
 # ------------------------
 
-m = 16  # delay embedding dim
-layers = [m, 256, 256, m]
+m = 10  # delay embedding dim
+layers = [m, 256, 256, 1]
 activation_hidden = swish
 activation_output = identity
 model = create_nn(layers; activation_hidden=activation_hidden, activation_output=activation_output)
@@ -148,7 +176,7 @@ fix_initial_state = false
 save_figs = false
 dim = 4 # Number of dimensions in the system
 dt = 0.001f0
-n_steps = 100
+n_steps = 40
 t = collect(0.0f0:dt:dt*(n_steps - 1))
 tspan = (t[1], t[end])
 Nsteps = 10000000
@@ -180,7 +208,7 @@ batch_size=16
 
 
 ########## 3. Clustering ##########
-averages, centers, Nc, labels = f_tilde_labels(σ_value, obs[:,1:100:end]; prob=prob, do_print=false, conv_param=conv_param, normalization=false)
+averages, centers, Nc, labels = f_tilde_labels(σ_value, obs[:,1:10:end]; prob=prob, do_print=false, conv_param=conv_param, normalization=false)
 inputs_targets = generate_inputs_targets(averages, centers, Nc; normalization=false)
 
 ########## 4. Score Functions ##########
@@ -203,9 +231,44 @@ scores = .- averages[:, centers_sorted_indices][:] ./ σ_value
 nn_clustered_cpu = nn |> cpu
 score_clustered(x) = .- nn_clustered_cpu(reshape(Float32[x...], :, 1))[:] ./ σ_value
 
+########## 6. Check Score function ##########
+
+function normalize_f(f, x, t, M, S)
+    return f(x .* S .+ M, t) .* S
+end
+
+
+function true_pdf_normalized(x)
+    x_phys = x .* S[1] .+ M[1]
+    U = .-0.5 .* x_phys.^2 .+ 0.25 .* x_phys.^4
+    p = exp.(-2 .* U ./ D_eff)
+    return p ./ S[1]
+end
+
+xax = [-1.25:0.005:1.25...]
+interpolated_score = [score_clustered(xax[i])[1] for i in eachindex(xax)]
+true_score = [2 * score_true(xax[i], 0.0)[1] / D_eff for i in eachindex(xax)]
+pdf_interpolated_norm = compute_density_from_score(xax_2, score_clustered)
+pdf_true = true_pdf_normalized(xax_2)
+scale_factor = maximum(kde_obs.density) / maximum(pdf_true)
+pdf_true .*= scale_factor
+
+########## 7. Plotting ##########
+Plots.default(fontfamily="Computer Modern", guidefontsize=12, tickfontsize=10, legendfontsize=10)
+plotlyjs()
+
+
+#Plot Score
+p_score = scatter(centers_sorted, scores; color=:blue, alpha=0.2, label="Cluster centers",
+    xlims=(-1.3, 1.3), ylims=(-5, 5), xlabel="𝑥", ylabel="Score(𝑥)", title="Score Function Estimate")
+plot!(p_score, xax, interpolated_score; label="NN interpolation", linewidth=2, color=:red)
+plot!(p_score, xax, true_score; label="Score analytic", linewidth=2, color=:lime)
+
+display(p_score)
+
 ########## Phi calculation ##########
 #rate matrix
-Q = generator(labels; dt=dt)*0.01
+Q = generator(labels; dt=dt)*0.1
 P_steady = steady_state(Q)
 #test if Q approximates well the dynamics
 tsteps = 101
@@ -243,19 +306,18 @@ end
 
 
 #==================== EMBEDDING SU x ====================#
-dt=0.001
 res=100
-tau_opt, _ = estimate_tau(obs_signal[1:100:end], dt*res)
-@info "Scelta ottimale di τ ≈ $(round(tau_opt, digits=4))"
+
+
 auto_obs = autocovariance(obs_signal[1:100:end], timesteps=1000)
 plotlyjs()
 plot(auto_obs, title="Autocovariance of x(t)", xlabel="Lag", ylabel="ACF", label="ACF of x(t)", lw=2, color=:blue)
-tau = 0.33 * tau_opt
+
+tau_opt, _ = estimate_tau(obs_signal[1:100:end], dt*res)
+@info "Scelta ottimale di τ ≈ $(round(tau_opt, digits=4))"
+tau = 0.25 * tau_opt
 Z = Float32.(delay_embedding(obs_signal; τ=tau, m=m))  # delay embedding sulla x
-size(Z,2)
-size(Z,1)
-Z[:,1]
-obs_signal[1]
+
 #==================== GENERAZIONE BATCH x ====================#
 batch_size = n_steps + 1
 n_batches = 2000
@@ -272,17 +334,6 @@ using BSON: @save
 save_every = 100 
 u = data_sample[rand(1:end)]
 
-# u[1,1]
-# dt=0.0001
-# dt
-# M_y = mean(obs_nn[3,:])
-# S_y = std(obs_nn[3,:])
-# obs_y2 = (obs_nn[3, :] .- M_y) ./ S_y
-# plot(obs_y2[1:1000000], title="Signal y2(t)", xlabel="Time", ylabel="Amplitude", label="y2(t)", lw=2, color=:blue)
-# sigma_Langevin(x, t) = Σ/sqrt(2)
-# n_steps = 1000000
-# prova=evolve_chaos([0.0], dt, n_steps, score_clustered_xt, sigma_Langevin, obs_y2; timestepper=:euler, resolution=1)
-# plot(prova[1, 1:1000000], title="Langevin y2(t)", xlabel="Time", ylabel="Amplitude", label="y2(t)", lw=2, color=:blue)
 
 for epoch in ProgressBar(1:n_epochs)
     loss_val, back = Flux.withgradient(p) do p
@@ -302,11 +353,85 @@ plot(plt_loss, losses, title="Loss vs Epoch", xlabel="Epoch", ylabel="Loss", lab
 
 
 # ------------------------
-# 7. Plot predictions: NODE on x(t)
+# 7. Plot predictions: NODE on x(t) short 
 # ------------------------
+
 
 @load "/Users/giuliodelfelice/Desktop/MIT/ClustGen/model_epoch_500.bson" p
 model_trained = re(p)
+
+# Predict short trajectory (500 steps) from Langevin + NODE model
+u0 = Z[1, 1]  # initial condition: only x(t0)
+timesteps = 500
+t_short = collect(0.0f0:dt:dt*(timesteps - 1))
+tspan_short = (t_short[1], t_short[end])
+
+# Delay embedding trajectory (z(t)) already given by Z[:, 1:timesteps]
+function predict_langevin_with_NODE_short(u0, model_trained, Z, Φ, dt, timesteps)
+    function dudt!(du, u, p, t)
+        i = clamp(round(Int, t / dt) + 1, 1, timesteps)
+        z = Z[:, i]
+        score = score_clustered_xt(u[1], Φ)
+        residual = model_trained(z)[1]
+        du[1] = score + residual
+    end
+    prob = ODEProblem(dudt!, [u0], (0.0f0, dt * (timesteps - 1)), nothing)
+    sol = solve(prob, Tsit5(), saveat=collect(0.0f0:dt:dt*(timesteps - 1)))
+    return hcat(sol.u...)[1, :]
+end
+
+y_pred_short = predict_langevin_with_NODE_short(u0, model_trained, Z[:, 1:timesteps], Φ, dt, timesteps)
+y_true_short = Z[1, 1:timesteps]
+
+# Plot prediction vs true
+plotlyjs()
+plt1 = plot(t_short, y_true_short, label="True y₂(t)", lw=2, color=:black)
+plot!(plt1, t_short, y_pred_short, label="Predicted y₂(t)", lw=2, ls=:dash, color=:green, title="Short-term prediction (NODE + Langevin)")
+
+# PDF
+kde_pred_short = kde(y_pred_short)
+kde_true_short = kde(y_true_short)
+plot_kde_short = plot(kde_pred_short.x, kde_pred_short.density; label="Prediction", color=:green)
+plot!(plot_kde_short, kde_true_short.x, kde_true_short.density; label="True", color=:black)
+
+# Display plots
+display(plt1)
+display(plot_kde_short)
+
+# Compare with Langevin rollout using predicted y₂(t) forcing
+for i in 1:10
+    j = rand(1:length(obs_signal) - timesteps)
+    x0 = obs_signal[j]
+    traj_langevin = evolve_chaos([x0], dt, timesteps, score_clustered_xt, sigma_Langevin, y_pred_short; timestepper=:euler, resolution=1)
+
+    plot_traj = plot(traj_langevin[1, :], label="Predicted x(t)", xlabel="Time Step", ylabel="x",
+        title="Langevin prediction with NODE forcing", lw=2, color=:blue)
+    plot!(plot_traj, obs_signal[j:j+timesteps-1], label="True x(t)", lw=2, color=:red)
+    display(plot_traj)
+end
+# ------------------------ END short-term prediction ------------------------ #
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@load "/Users/giuliodelfelice/Desktop/MIT/ClustGen/model_epoch_500.bson" p
+model_trained = re(p)
+
 
 # Predict full delay embedding trajectory from Langevin effective model
 u0 = Z[:, 1]
