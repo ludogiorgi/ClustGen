@@ -55,9 +55,9 @@ function smoothed_dx(x, dt)
 end
 
 #====================ESTIMATE DECORRELATION TIME=====================#
-function estimate_tau(y, dt; threshold=0.2)
+function estimate_tau(y, dt; threshold=0.1)
     y_centered = y .- mean(y)
-    acf = autocor(y_centered)
+    acf = autocovariance(y_centered, timesteps=500)
     for i in 2:length(acf)
         if abs(acf[i]) < threshold
             return i * dt, acf
@@ -133,13 +133,9 @@ function dudt!(du, u, p, t)
 end
 
 #==================== INTEGRATION ====================#
-function predict_neuralode(x0::Float32, z0_base::Vector{Float32}, z0_context::Vector{Float32}, 
-                           p, tspan, tsteps)
-    _, correction_net = re_combined(p)
-    correction = correction_net(z0_context)
-    z_corr = z0_base .+ correction
-    s0 = vcat(x0, z_corr)
+function predict_neuralode(input_vec, p, tspan, tsteps)
 
+    s0 = full_initial_condition(input_vec, correction_net)
     prob = ODEProblem(dudt!, s0, tspan, p)
     sol = solve(prob, Tsit5(), saveat=tsteps,
                 sensealg=InterpolatingAdjoint(autojacvec=ZygoteVJP()),
@@ -157,7 +153,7 @@ function loss_neuralode(p)
     loss = 0.0f0
     for _ in 1:100
         (x0, z0_base, z0_context), x_true = rand(data_sample)
-        x_pred = predict_neuralode(x0, z0_base, z0_context, p, tspan, t)
+        x_pred = predict_neuralode((x0, z0_base, z0_context), p, tspan, t)
         loss += sum((x_pred .- x_true[1:end-1]).^2)
     end
     return loss / 100
@@ -205,17 +201,17 @@ end
 # 1. Model definition
 # ------------------------
 
-m = 10  # delay embedding dim
+m = 15  # delay embedding dim
 # NODE model
-layers_node = [m, 256, 256, m]
+layers_node = [m, 256, 256, 1]
 g_theta = create_nn(layers_node; activation_hidden=swish, activation_output=identity)
 
 # Correction NN
-k = 6  
+k = 8  
 layers_corr = [k, 32, m]
 correction_net = create_nn(layers_corr; activation_hidden=swish, activation_output=identity)
 
-correction_net = create_nn(layers_corr; activation_hidden=swish, activation_output=identity)
+
 
 
 #extract parameters from the model
@@ -233,7 +229,7 @@ fix_initial_state = false
 save_figs = false
 dim = 4 # Number of dimensions in the system
 dt = 0.001f0
-n_steps = 60
+n_steps = 70
 dt_training = 0.001f0
 
 #generate data
@@ -394,6 +390,8 @@ dt=0.001
 acf_y2 = autocovariance(y2_obs_norm, timesteps=500)
 plotlyjs()
 plot(acf_y2)
+
+
 tau_opt, _ = estimate_tau(y2_obs_norm, dt)
 τ = 0.25*tau_opt
 n_batches = 2000
@@ -426,8 +424,7 @@ for i in selected_indices
     # z0 base (m-dim delay embedding)
     z0_base = Float32.(Z_all[:, i])  # vettore ∈ ℝᵐ
 
-    # z0 context: primi k elementi del delay embedding
-    k = 6 # o quello che scegli
+    k = 8 
     if k > m
         error("k must be ≤ m")
     end
@@ -551,13 +548,12 @@ x_segment = obs_signal[1:window_length]  # Oppure scegli un altro punto iniziale
 
 # === Condizione iniziale z₀ corretta === #
 z0 = estimate_z0_corrected(x_segment, dt, correction_net; m=m, τ=τ, k=k)
-
 # === Predizione breve === #
-t_short = 0.0f0:dt:dt*99
+t_short = 0.0f0:dt:dt*49
 tspan_short = (t_short[1], t_short[end])
 z_pred_short = predict_y_trajectory(z0, g_theta, tspan_short, t_short)
-y_pred_short = z_pred_short[1, :]
-y_true_short = y2_obs_norm[1:10:(100*10)]  # ground truth dalla serie di y già calcolata
+y_pred_short = z_pred_short[1,:]
+y_true_short = y2_obs_norm[1:10:(50*10)]  # ground truth dalla serie di y già calcolata
 
 plotlyjs()
 plt1 = plot(t_short, y_true_short, label="True y(t)", lw=2, color=:red)
@@ -565,7 +561,7 @@ plot!(plt1, t_short, y_pred_short, label="Predicted y(t)", lw=2, color=:blue, ti
 display(plt1)
 
 # === Predizione lunga === #
-n_long = 10000
+n_long = 1000
 t_long = 0.0f0:dt:dt*(n_long - 1)
 length(t_long)
 tspan_long = (t_long[1], t_long[end])
@@ -573,7 +569,7 @@ z_pred_long = predict_y_trajectory(z0, g_theta, tspan_long, t_long)
 size(z_pred_long, 2)
 
 max_steps = min(size(z_pred_long, 2), length(y2_obs_norm))
-y_pred_long = z_pred_long[1, 1:max_steps]
+y_pred_long = z_pred_long[1:max_steps]
 y_true_long = y2_obs_norm[1:10:(max_steps*10)]
 t_plot = t_long[1:max_steps]
 
@@ -583,7 +579,7 @@ y_pred_long_norm = normalize_time_series(y_pred_long)
 
 # Plot finale
 plt2 = plot(t_plot, y_true_long, label="True y(t)", lw=2, color=:red)
-plot!(plt2, t_plot, y_pred_long_norm, label="Predicted y(t)", lw=2, ls=:dash, color=:blue,
+plot!(plt2, t_plot, y_pred_long, label="Predicted y(t)", lw=2, ls=:dash, color=:blue,
        title="Long-term y(t) Prediction")
 
 kde_pred = kde(y_pred_long_norm)
