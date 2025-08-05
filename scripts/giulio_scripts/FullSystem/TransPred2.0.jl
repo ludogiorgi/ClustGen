@@ -35,13 +35,6 @@ function F(x, t, σ, ε ; µ=10.0, ρ=28.0, β=8/3)
     return [dx, dy1, dy2, dy3]
 end
 
-function sigma(x, t; noise = 0.0)
-    sigma1 = noise
-    sigma2 = noise
-    sigma3 = noise
-    sigma4 = noise #Added: This is for the 4th variable
-    return [sigma1, sigma2, sigma3, sigma4]
-end
 
 #====================Smoothed derivative of x(t)=====================#
 function smoothed_dx(x, dt)
@@ -561,7 +554,7 @@ plot!(plt1, t_short, y_pred_short, label="Predicted y(t)", lw=2, color=:blue, ti
 display(plt1)
 
 # === Predizione lunga === #
-n_long = 1000
+n_long = 10000
 t_long = 0.0f0:dt:dt*(n_long - 1)
 length(t_long)
 tspan_long = (t_long[1], t_long[end])

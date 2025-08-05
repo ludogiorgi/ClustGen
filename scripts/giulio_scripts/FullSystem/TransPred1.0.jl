@@ -314,8 +314,8 @@ display(p_score)
 # 7. Phi calculation
 # ------------------------
 #rate matrix
-dt = 0.001f0
-Q = generator(labels; dt=dt)*0.1
+dt = 0.01
+Q = generator(labels; dt=dt)*0.29
 P_steady = steady_state(Q)
 #test if Q approximates well the dynamics
 tsteps = 501
@@ -348,6 +348,32 @@ plot(autocov_y2, label="Autocovariance of y2", xlabel="Lag", ylabel="Autocovaria
 ########## Estimate y2 from the slow variable x ##########
 dt=0.001
 Σ_rescaled = Σ / sqrt(2*1.5)  # Rescale Σ for the score function
+#estimate new safe values for x to extract y(t)
+function poly_tail_score(x; D_eff=D_eff)
+    return 2 * (x - x^3) / D_eff
+end
+
+function score_extended(x)
+    if x ≥ -1.20 && x ≤ 1.08
+        return score_clustered(x)
+    else
+        return poly_tail_score(x)
+    end
+end
+
+score_extended_xt(x,t) = Φ * score_extended(x)
+
+function estimate_y2(x::Vector{Float64}, Φ::Float64, Σ::Float64, dt::Float64)
+    N = length(x) - 1
+    y2_estimated = zeros(Float64, N)
+    for n in 1:N
+        dx_dt = (x[n+1] - x[n]) / dt
+        s = score_extended_xt(x[n], n * dt)
+        y2_estimated[n] = (dx_dt - s[1]) / Σ
+    end
+    return y2_estimated
+end
+
 
 #estimate y2 training set and y2 validation set from obs_train and obs_validation
 y2_x_train = estimate_y2(obs_train, Φ, Σ_rescaled, dt)
@@ -398,9 +424,13 @@ end
 
 @info "Scelta ottimale di τ ≈ $(round(τ_opt, digits=4))"
 τ = 0.25*τ_opt  
+q = round(Int, τ / dt)
 
 Z_train = Float32.(delay_embedding(y2x_t_norm; τ=τ, m=m))
-Z_val = Float32.(delay_embedding(y2x_v_norm; τ=τ, m=m))
+Y_embed = Float32.(delay_embedding(y2x_v_norm; τ=τ, m=m))  # (m, N)
+X_cut = Float32.(obs_val[(2 + (m-1) * q):end])                   # (N,)
+Z_val = vcat(X_cut', Y_embed)                              # (m+1, N)
+
 # ------------------------
 # 9. Batching for NODE training
 # ------------------------
@@ -416,7 +446,7 @@ data_sample = gen_batches(Z_train, batch_size, n_batches)
 p = flat_p0
 opt = Optimisers.Adam(0.01)
 state = Optimisers.setup(opt, p)
-n_epochs = 500
+n_epochs = 1000
 losses = []
 
 weights = exp.(LinRange(0.0f0, -1.0f0, n_steps))
@@ -435,7 +465,8 @@ for epoch in ProgressBar(1:n_epochs)
     push!(losses, loss_val)
 
     if epoch % save_every == 0
-        @save "model_epoch_$(epoch).bson" p
+        mkpath("best_NODE_y")  # crea la cartella se non esiste
+        @save joinpath("best_NODE_y", "model_epoch_$(epoch).bson") p
     end
 end
 
@@ -453,34 +484,38 @@ plot(plt_loss, losses, title="Loss vs Epoch", xlabel="Epoch", ylabel="Loss", lab
 # ------------------------
 @load "/Users/giuliodelfelice/Desktop/MIT/MODELLO TRAINATO CHE ANDAVA ABBASTANZA BENE CON LA y2 estratta dalla x/model_epoch_500.bson" p
 
-@load "/Users/giuliodelfelice/Desktop/MIT/ClustGen/model_epoch_500.bson" p
+@load "/Users/giuliodelfelice/Desktop/MIT/ClustGen/best_NODE_y/model_epoch_1000.bson" p
 model_trained = re(p)
 
 acfs_pred = Matrix{Float64}(undef, 100, 10)
 acfs_true = Matrix{Float64}(undef, 100, 10)
 
+y_pred_short = nothing
+y_true_short = nothing
+
+function predict_with_model(u0, model, tspan, t)
+    function dudt!(du, u, _, t)
+        du .= model(u)
+    end
+    prob = ODEProblem(dudt!, u0, tspan)
+    sol = solve(prob, Tsit5(), saveat=t)
+    return hcat(sol.u...)
+end
+
 for n in 1:10
     # First 500 steps prediction vs truth
     dt = 0.01
     j = rand(1:size(Z_val, 2))
-    u0 = Z_val[:, j]
+    u0 = Y_embed[:, j]
     t_short = collect(0.0f0:dt:dt*9000)
     tspan_short = (t_short[1], t_short[end])
 
-    function predict_with_model(u0, model, tspan, t)
-        function dudt!(du, u, _, t)
-            du .= model(u)
-        end
-        prob = ODEProblem(dudt!, u0, tspan)
-        sol = solve(prob, Tsit5(), saveat=t)
-        return hcat(sol.u...)
-    end
 
     pred_short = predict_with_model(u0, model_trained, tspan_short, t_short)
     y_pred_short = pred_short[1, :]
     y_pred_short = normalize_time_series(y_pred_short)
 
-    y_true_short = Z_val[1, j:10:(j + 10*9000)]
+    y_true_short = Y_embed[1, j:10:(j + 10*9000)]
 
     acf_y_pred_short = autocovariance(y_pred_short, timesteps = 100)
     acf_y_true_short = autocovariance(y_true_short, timesteps = 100)
@@ -490,13 +525,15 @@ for n in 1:10
     acfs_true[:, n] .= acf_y_true_short
 
 
-plotlyjs()
+    plotlyjs()
 
-plt1 = plot(t_short[1:250], y_true_short[1:250]; label="True y₂(t)", lw=2, color=:blue, markershape=:square, markerstrokewidth=1, markersize=3, line=:solid, marker=:auto)
+    plt1 = plot(t_short[1:250], y_true_short[1:250]; label="True y₂(t)", lw=2, color=:blue, markershape=:square, markerstrokewidth=1, markersize=3, line=:solid, marker=:auto)
 
-plot!(plt1, t_short[1:250], y_pred_short[1:250]; label="Predicted y₂(t)", lw=2, color=:orange, markershape=:square, markerstrokewidth=1, markersize=3, line=:solid, marker=:auto, title="Prediction: 500 steps", xlabel="t", ylabel="y₂(t)")
-display(plt1)
+    plot!(plt1, t_short[1:250], y_pred_short[1:250]; label="Predicted y₂(t)", lw=2, color=:orange, markershape=:square, markerstrokewidth=1, markersize=3, line=:solid, marker=:auto, title="Prediction: 500 steps", xlabel="t", ylabel="y₂(t)")
+    display(plt1)
+
 end
+
 
 mean_acfs_pred = mean(acfs_pred, dims=2)[:]
 std_acfs_pred = std(acfs_pred, dims=2)[:]
@@ -509,7 +546,20 @@ std_acfs_true = std(acfs_true, dims=2)[:]
 
 gr()  # Assicurati che il backend sia impostato
 
+
+
+t_short = collect(0.0f0:dt:dt*100000)
+tspan_short = (t_short[1], t_short[end])
 t_plot = t_short[1:100]
+
+max_j = size(Y_embed, 2) - 10 * 100000
+j = rand(1:max_j)
+u0 = Y_embed[:, j]
+pred_short = predict_with_model(u0, model_trained, tspan_short, t_short)
+y_pred_short = pred_short[1, :]
+y_pred_hist = normalize_time_series(y_pred_short)
+y_true_hist = Y_embed[1, j:10:(j + 10*100000)]
+
 
 # Vettori 1D
 mean_acfs_pred_vec = mean_acfs_pred[:]
@@ -563,7 +613,7 @@ plot!(plot_kde_short, kde_obs_y2_short.x, kde_obs_y2_short.density; label = "obs
 nbins = 100
 
 plot_hist = Plots.histogram(
-    y_pred_short;
+    y_pred_hist;
     bins = nbins,
     normalize = true,
     label = "Prediction",
@@ -573,7 +623,7 @@ plot_hist = Plots.histogram(
 )
 
 Plots.histogram!(
-    plot_hist, y_true_short;
+    plot_hist, y_true_hist;
     bins = nbins,
     normalize = true,
     label = "Observations",
@@ -585,7 +635,7 @@ Plots.histogram!(
 
 
 
-display(plt1)
+display(plt_acfs)
 display(plot_kde_short)
 
 #evaluate accuracy for short term prediction of the fast variable y2
@@ -600,17 +650,17 @@ for lag in lags
     rmses_NODE = Float64[] #array to store squared differences
     
     for n in 1:N_traj
-        j = rand(1:(size(Z_val, 2)))
-        if j + 500 > size(Z_val, 2)
+        j = rand(1:(size(Y_embed, 2)))
+        if j + 500 > size(Y_embed, 2)
             println("Invalid value of index j")
             continue
         end
-        u0 = Z_val[:, j] #set initial condition
+        u0 = Y_embed[:, j] #set initial condition
         t = collect(0.0f0:dt:dt*lag)
         tspan = (t[1], t[end])
         pred = predict_with_model(u0, model_trained, tspan, t)
         y_pred = pred[1, :]
-        y_true = Z_val[1, j:10:(j+(10*lag))]
+        y_true = Y_embed[1, j:10:(j+(10*lag))]
 
         #compute RMSE
         rmse = sqrt(mean((y_pred .- y_true).^2))
@@ -667,8 +717,8 @@ display(plt)
 plotlyjs()
 
 #detect critical transitions in the validation set
-obs_val = obs_signal[Ntrain+1:end]
-obs_val = obs_val[1:10:end]
+obs_val = Z_val[1, 1:10:end]
+
 # sigma_Langevin(x, t) = Σ / sqrt(2*1.02)
 # x0 = obs_val[1] 
 # traj_langevin_test = evolve_chaos([x0], dt, length(y_pred_short), score_clustered_xt, sigma_Langevin, y_pred_short; timestepper=:euler, resolution=1)
@@ -682,12 +732,13 @@ else
     println("No transition found. Change threshold or window.")
 end
 
-sigma_Langevin(x, t) = Σ 
+sigma_Langevin(x, t) = Σ / sqrt(2*1.5)
 #define list of time horizons for predictions
 theta = [0.35, 1.0, 2.5, 5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 35.0, 40.0, 45.0, 50.0, 55.0, 60.0] #in seconds
 
 #convert the time horizon into number of steps
 timesteps = round.(Int, theta ./ dt)
+@assert minimum(transitions) > maximum(timesteps)
 
 #initialize array for mse as a function of theta
 rmses_vs_theta = Float64[]
@@ -695,7 +746,7 @@ var_rmses_x = Float64[]
 
 for timestep in timesteps
     rmses = Float64[]
-    for tau_n in transitions
+    for tau_n in transitions[2:end]
         x0 = obs_val[tau_n - timestep]
         traj_langevin = evolve_chaos([x0], dt, timestep + 10, score_clustered_xt, sigma_Langevin, y_pred_short; timestepper=:euler, resolution=1)
         pred = traj_langevin[1, 1:end]  
@@ -745,19 +796,18 @@ scatter!(
 # 
 
 plotlyjs()
-obs_val = obs_signal[Ntrain+1:end] 
-obs_val = obs_val[1:10:end]
+obs_val = Z_val[1, 1:10:end]
 
 # Scegli gli indici di theta (i.e., timestep) che vuoi plottare
 indices_to_plot = [1, 2, 3, 4, 5]
 colors = [:blue, :orange]
 # Creazione del layout verticale
-sigma_Langevin(x, t) = Σ / sqrt(2*1.5)
+sigma_Langevin(x, t) = Σ /sqrt(2*1.5)
 p_combined = plot(layout=(5,1), size=(800, 1200))
 
 for (k, idx) in enumerate(indices_to_plot)
     timestep = timesteps[idx]
-    tau_n = transitions[35]  # prima transizione
+    tau_n = transitions[30]  # prima transizione
 
     x0 = obs_val[tau_n - timestep]
     traj_langevin = evolve_chaos([x0], dt, timestep + 500, score_clustered_xt, sigma_Langevin, y_pred_short;
@@ -890,7 +940,50 @@ scatter!(
 
 
 
+@load "/Users/giuliodelfelice/Desktop/MIT/ClustGen/model_epoch_1000.bson" p
+model_trained = re(p)
 
+@load "/Users/giuliodelfelice/Desktop/MIT/MODELLO TRAINATO CHE ANDAVA ABBASTANZA BENE CON LA y2 estratta dalla x/model_epoch_500.bson" p
+model_trained = re(p)
+
+# First 100 steps prediction vs truth
+u0 = Z_val[:, rand(1:((size(Z_val,2))-100000))]
+
+
+function predict_with_model(u0, model, tspan, t)
+    function dudt!(du, u, _, t)
+        du .= model(u)
+    end
+    prob = ODEProblem(dudt!, u0, tspan)
+    sol = solve(prob, Tsit5(), saveat=t)
+    return hcat(sol.u...)
+end
+
+
+# First n_long steps prediction vs truth
+n_long = 500
+t_long = collect(0.0f0:dt:dt*(n_long - 1))
+tspan_long = (t_long[1], t_long[end])
+pred_long = predict_with_model(u0, model_trained, tspan_long, t_long)
+max_steps = min(size(pred_long, 2), size(Z_val, 2))
+y_pred_long = normalize_time_series(pred_long[1, 1:max_steps])
+y_true_long = Z_val[1, 1:10:10*max_steps]
+t_plot = t_long[1:max_steps]
+
+#Plot of the time series
+plotlyjs()
+plt2 = plot(t_plot, y_true_long, label="True y2(t)", lw=2)
+plot!(plt2, t_plot, y_pred_long, label="Predicted y(t)", lw=2, ls=:dash, title="$n_long steps with m= $m, n_steps = $n_steps and dt = $dt")
+display(plt2)
+#plot of the PDFs
+plotlyjs()
+kde_pred = kde(y_pred_long)
+kde_obs = kde(y_true_long)
+plot_kde = plot(kde_pred.x, kde_pred.density; label = "prediction", color = :red)
+plot!(plot_kde, kde_obs.x, kde_obs.density; label = "observations", color = :blue)
+display(plot_kde)
+
+#=============== END MAIN ===============#
 
 
 

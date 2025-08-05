@@ -153,7 +153,7 @@ function evolve(u0, dt, Nsteps, f, sigma; seed=123, resolution=1, timestepper=:r
             t += dt
             
             # Reset if boundary is crossed
-            if any(u .< boundary[1]) || any(u .> boundary[2])
+            if any(u[1] .< boundary[1]) || any(u[1] .> boundary[2])
                 u .= u0
                 count += 1
             end
