@@ -266,7 +266,7 @@ fig = Figure(resolution=(1800, 1000), font="CMU Serif", fontsize=24)
 
 # Define common elements - update colors to match your previous plots
 colors = [:blue, :black, :red]  # True/Numerical, Linear, KGMM/Generative
-labels = ["Numerical", "Gaussian", "KGMM"]
+labels = ["Dynamical", "Gaussian", "KGMM"]
 time_axis = 0:10*dt*res_trj:n_tau*10*dt*res_trj
 
 # Create axes array - 5 columns (PDFs + 4 moments)

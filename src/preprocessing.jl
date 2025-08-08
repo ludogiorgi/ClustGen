@@ -1,39 +1,43 @@
 
 """
-    parallel_assign_labels(x, state_space_partitions)
+    parallel_assign_labels(x, state_space_partitions; verbose=false)
 
 Assign cluster labels to data points using multi-threaded parallelization.
 
 # Arguments
 - `x`: Input data matrix with shape (dimensions, n_points)
 - `state_space_partitions`: StateSpacePartition object with an embedding method
+- `verbose`: Whether to show progress bar (default: false)
 
 # Returns
 - Vector of integer labels for each data point
 
 # Note
 This function uses all available threads to speed up label assignment for large datasets
-while providing a thread-safe progress bar.
+while providing a thread-safe progress bar when verbose=true.
 """
 
-function parallel_assign_labels(x, state_space_partitions)
+function parallel_assign_labels(x, state_space_partitions; verbose=false)
     n_points = size(x, 2)
     labels = zeros(Int, n_points)
     
-    # Create a thread-safe progress meter
-    prog = Progress(n_points, desc="Assigning labels: ", barglyphs=BarGlyphs("[=> ]"))
-    
-    # Use a ReentrantLock for safe progress updates
-    prog_lock = ReentrantLock()
+    # Create a thread-safe progress meter only if verbose
+    if verbose
+        prog = Progress(n_points, desc="Assigning labels: ", barglyphs=BarGlyphs("[=> ]"))
+        # Use a ReentrantLock for safe progress updates
+        prog_lock = ReentrantLock()
+    end
     
     # Parallelize the label assignment
     @inbounds Threads.@threads for i in 1:n_points
         # Compute embedding for this data point
         labels[i] = state_space_partitions.embedding(x[:,i])
         
-        # Safely update progress bar
-        lock(prog_lock) do
-            next!(prog)
+        # Safely update progress bar only if verbose
+        if verbose
+            lock(prog_lock) do
+                next!(prog)
+            end
         end
     end
     
@@ -59,7 +63,7 @@ function generate_xz(y, sigma)
 end
 
 """
-    calculate_averages(X, z, x, y)
+    calculate_averages(X, z, x, y; verbose=false)
 
 Calculate cluster centers and average values for each cluster with parallel processing.
 
@@ -68,11 +72,12 @@ Calculate cluster centers and average values for each cluster with parallel proc
 - `z`: Noise vectors
 - `x`: Perturbed data points
 - `y`: Original data points
+- `verbose`: Whether to show progress bar (default: false)
 
 # Returns
 - Tuple of (average noise, average residuals, cluster centers)
 """
-function calculate_averages(X, z, x, y)
+function calculate_averages(X, z, x, y; verbose=false)
     # Get dimensions
     Ndim, Nz = size(z)
     Nc = maximum(X)
@@ -89,9 +94,11 @@ function calculate_averages(X, z, x, y)
     local_y_sum = [zeros(Ndim, Nc) for _ in 1:n_threads]
     local_count = [zeros(Int, Nc) for _ in 1:n_threads]
     
-    # Create a thread-safe progress meter
-    prog = Progress(Nz, desc="Calculating averages: ", barglyphs=BarGlyphs("[=> ]"))
-    prog_lock = ReentrantLock()
+    # Create a thread-safe progress meter only if verbose
+    if verbose
+        prog = Progress(Nz, desc="Calculating averages: ", barglyphs=BarGlyphs("[=> ]"))
+        prog_lock = ReentrantLock()
+    end
     
     # Parallel accumulation of sums
     @inbounds Threads.@threads for i in 1:Nz
@@ -104,9 +111,11 @@ function calculate_averages(X, z, x, y)
         @views local_y_sum[tid][:, segment_index] .+= y[:, i]
         local_count[tid][segment_index] += 1
         
-        # Update progress safely
-        lock(prog_lock) do
-            next!(prog)
+        # Update progress safely only if verbose
+        if verbose
+            lock(prog_lock) do
+                next!(prog)
+            end
         end
     end
     
@@ -230,7 +239,7 @@ function generate_inputs_targets(averages_values, centers_values, Nc_values; nor
 end
 
 """
-    f_tilde_σ(σ::Float64, μ; prob = 0.001, do_print=false, conv_param=1e-1, i_max = 150)
+    f_tilde_σ(σ::Float64, μ; prob = 0.001, verbose=false, conv_param=1e-1, i_max = 150)
 
 Iteratively estimate score function at σ until convergence.
 
@@ -238,14 +247,14 @@ Iteratively estimate score function at σ until convergence.
 - `σ`: Noise standard deviation
 - `μ`: Original data points
 - `prob`: Probability threshold for state space partitioning
-- `do_print`: Whether to print progress
+- `verbose`: Whether to print progress and show progress bars (default: false)
 - `conv_param`: Convergence threshold
 - `i_max`: Maximum number of iterations
 
 # Returns
 - Tuple containing (average noise, average residuals, centers, number of clusters, partition)
 """
-function f_tilde_σ(σ::Float64, μ; prob = 0.001, do_print=false, conv_param=1e-1, i_max = 150)
+function f_tilde_σ(σ::Float64, μ; prob = 0.001, verbose=false, conv_param=1e-1, i_max = 150)
     # Initialize state space partitioning
     method = Tree(false, prob)
     
@@ -255,13 +264,15 @@ function f_tilde_σ(σ::Float64, μ; prob = 0.001, do_print=false, conv_param=1e
     # Create partition of state space
     state_space_partitions = StateSpacePartition(x; method = method)
     Nc = maximum(state_space_partitions.partitions)
-    println("Number of clusters: $Nc")
+    if verbose
+        println("Number of clusters: $Nc")
+    end
     
     # Get cluster labels for each point
-    labels = parallel_assign_labels(x, state_space_partitions)
+    labels = parallel_assign_labels(x, state_space_partitions; verbose=verbose)
     
     # Calculate initial averages
-    averages, averages_residual, centers = calculate_averages(labels, z, x, μ)
+    averages, averages_residual, centers = calculate_averages(labels, z, x, μ; verbose=verbose)
     averages_old, averages_residual_old, centers_old = averages, averages_residual, centers
     
     # Iterative refinement
@@ -272,10 +283,10 @@ function f_tilde_σ(σ::Float64, μ; prob = 0.001, do_print=false, conv_param=1e
         x, z = generate_xz(μ, σ)
         
         # Apply partition
-        labels = parallel_assign_labels(x, state_space_partitions)
+        labels = parallel_assign_labels(x, state_space_partitions; verbose=verbose)
         
         # Calculate new averages
-        averages, averages_residual, centers = calculate_averages(labels, z, x, μ)
+        averages, averages_residual, centers = calculate_averages(labels, z, x, μ; verbose=verbose)
         
         # Update running averages
         averages_new = (averages .+ i .* averages_old) ./ (i+1)
@@ -285,7 +296,7 @@ function f_tilde_σ(σ::Float64, μ; prob = 0.001, do_print=false, conv_param=1e
         # Check convergence
         D_avr_temp = mean(abs2, averages_new .- averages_old) / mean(abs2, averages_new)
         
-        if do_print==true
+        if verbose
             println("Iteration: $i, Δ: $D_avr_temp")
         end
         
@@ -312,7 +323,7 @@ Apply f_tilde_σ for multiple noise levels with diffusion times.
 - Neural network inputs and targets for training
 """
 function f_tilde(σ_values::Vector{Float64}, diff_times::Vector{Float64}, μ; 
-                prob = 0.001, do_print=false, conv_param=1e-1, i_max = 150, normalization=true, residual=false)
+                prob = 0.001, verbose=false, conv_param=1e-1, i_max = 150, normalization=true, residual=false)
     # Initialize storage
     averages_values = []
     averages_residual_values = []
@@ -323,7 +334,7 @@ function f_tilde(σ_values::Vector{Float64}, diff_times::Vector{Float64}, μ;
     @inbounds for i in eachindex(σ_values)
         averages, averages_residual, centers, Nc, _ = f_tilde_σ(σ_values[i], μ; 
                                                            prob=prob, 
-                                                           do_print=do_print, 
+                                                           verbose=verbose, 
                                                            conv_param=conv_param, 
                                                            i_max=i_max)
         push!(averages_values, averages)
@@ -354,11 +365,11 @@ Apply f_tilde_σ for a single noise level.
 - Neural network inputs and targets for training
 """
 function f_tilde(σ_value::Float64, μ; 
-                prob = 0.001, do_print=false, conv_param=1e-1, i_max = 150, normalization=true, residual=false)
+                prob = 0.001, verbose=false, conv_param=1e-1, i_max = 150, normalization=true, residual=false)
     # Process single noise level
     averages, averages_residual, centers, Nc, _ = f_tilde_σ(σ_value, μ; 
                                                        prob=prob, 
-                                                       do_print=do_print, 
+                                                       verbose=verbose, 
                                                        conv_param=conv_param, 
                                                        i_max=i_max)
     
@@ -384,11 +395,11 @@ Apply f_tilde_σ for a single noise level and return the state space partition.
 - Tuple containing (averages, averages_residual, centers, Nc, state_space_partition)
 """
 function f_tilde_ssp(σ_value::Float64, μ; 
-                    prob = 0.001, do_print=false, conv_param=1e-1, i_max = 150, normalization=true)
+                    prob = 0.001, verbose=false, conv_param=1e-1, i_max = 150, normalization=true)
     # Process single noise level and return full results including state space partition
     averages, averages_residual, centers, Nc, ssp = f_tilde_σ(σ_value, μ; 
                                                          prob=prob, 
-                                                         do_print=do_print, 
+                                                         verbose=verbose, 
                                                          conv_param=conv_param, 
                                                          i_max=i_max)
     return averages, averages_residual, centers, Nc, ssp
@@ -408,11 +419,11 @@ Apply f_tilde_σ and return cluster labels along with averages and centers.
 - Tuple containing (averages, centers, Nc, labels)
 """
 function f_tilde_labels(σ_value::Float64, μ; 
-                       prob = 0.001, do_print=false, conv_param=1e-1, i_max = 150, normalization=true)
+                       prob = 0.001, verbose=false, conv_param=1e-1, i_max = 150, normalization=true)
     # Process single noise level
     averages, averages_residual, centers, Nc, ssp = f_tilde_σ(σ_value, μ; 
                                                          prob=prob, 
-                                                         do_print=do_print, 
+                                                         verbose=verbose, 
                                                          conv_param=conv_param, 
                                                          i_max=i_max)
     

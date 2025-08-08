@@ -4,6 +4,7 @@ uuid = "f2f1396f-92bc-44d6-b08c-9538e9b00f00"
 [deps]
 BSON = "fbb218c0-5317-5bc6-957e-2ee96dd4b1f0"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 ColorSchemes = "35d6a980-a343-548e-a6ea-1d62b119f2f4"
 DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
@@ -44,6 +45,7 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 cuDNN = "02a925ec-e4fe-4b08-9a7e-0d78e3d38ccd"
 
 [compat]
+CairoMakie = "0.11.11"
 ColorSchemes = "3.29.0"
 DSP = "0.7.10"
 Distributed = "1.11.0"

@@ -486,7 +486,7 @@ rowgap!(fig.layout, 20)
 fig.layout[3, :] = GridLayout(height=20)
 
 # Save figure
-save("figures/HOR_figures/reduced_responses.png", fig, px_per_unit=2)  # Higher DPI for better print quality
+#save("figures/HOR_figures/reduced_responses.png", fig, px_per_unit=2)  # Higher DPI for better print quality
 
 fig
 

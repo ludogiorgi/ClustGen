@@ -427,7 +427,7 @@ fig = Figure(resolution=(1800, 2200), font="CMU Serif", fontsize=24)
 
 # Define common elements
 colors = [:blue, :black, :red]
-labels = ["Numerical", "Gaussian", "KGMM"]
+labels = ["Dynamical", "Gaussian", "KGMM"]
 time_axis = 0:dt*res_trj:n_tau*dt*res_trj
 
 # Create standard normal PDF function for the "linear" model

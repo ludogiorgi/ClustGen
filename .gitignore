@@ -42,3 +42,17 @@ scripts/PlaSim/PlaSim_data/
 *.mat
 *.jld
 *.jld2
+
+# Figures and image outputs (ignore globally)
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.eps
+*.tif
+*.tiff
+*.gif
+*.pdf
+
+# Additional binary/data formats
+*.bson

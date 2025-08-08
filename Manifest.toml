@@ -2,7 +2,7 @@
 
 julia_version = "1.11.6"
 manifest_format = "2.0"
-project_hash = "e53d6ab0019d19b6b1ad9f6282240741b322a14b"
+project_hash = "b0895fd56385eca8e5fd220c9ff0f1f52d1c92f6"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "be7ae030256b8ef14a441726c4c37766b90b93a3"
@@ -348,6 +348,18 @@ deps = ["Artifacts", "CUDA_Runtime_jll", "JLLWrappers", "LazyArtifacts", "Libdl"
 git-tree-sha1 = "9851af16a2f357a793daa0f13634c82bc7e40419"
 uuid = "62b44479-cb7b-5706-934f-f13b2eb2e645"
 version = "9.4.0+0"
+
+[[deps.Cairo]]
+deps = ["Cairo_jll", "Colors", "Glib_jll", "Graphics", "Libdl", "Pango_jll"]
+git-tree-sha1 = "71aa551c5c33f1a4415867fe06b7844faadb0ae9"
+uuid = "159f3aea-2a34-519c-b102-8c37f9878175"
+version = "1.1.1"
+
+[[deps.CairoMakie]]
+deps = ["CRC32c", "Cairo", "Colors", "FileIO", "FreeType", "GeometryBasics", "LinearAlgebra", "Makie", "PrecompileTools"]
+git-tree-sha1 = "d69c7593fe9d7d617973adcbe4762028c6899b2c"
+uuid = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+version = "0.11.11"
 
 [[deps.Cairo_jll]]
 deps = ["Artifacts", "Bzip2_jll", "CompilerSupportLibraries_jll", "Fontconfig_jll", "FreeType2_jll", "Glib_jll", "JLLWrappers", "LZO_jll", "Libdl", "Pixman_jll", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Zlib_jll", "libpng_jll"]
@@ -1085,6 +1097,12 @@ deps = ["DataStructures", "GeometryBasics", "Graphs", "LinearAlgebra", "Makie", 
 git-tree-sha1 = "bdddc4afd944ccc67afbd81791d88d944c36f410"
 uuid = "1ecd5474-83a3-4783-bb4f-06765db800d2"
 version = "0.5.10"
+
+[[deps.Graphics]]
+deps = ["Colors", "LinearAlgebra", "NaNMath"]
+git-tree-sha1 = "a641238db938fff9b2f60d08ed9030387daf428c"
+uuid = "a2bd30eb-e257-5431-a919-1863eab51364"
+version = "1.1.3"
 
 [[deps.Graphite2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]

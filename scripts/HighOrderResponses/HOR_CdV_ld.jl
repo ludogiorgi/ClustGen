@@ -329,48 +329,48 @@ score_trj = evolve(zeros(dim), 0.01*dt, 10000000, score_gen_xt, sigma_I; timeste
 ##
 # Save the results to an HDF5 file
 
-save_variables_to_hdf5("data/HOR_data/CdV_results_ld_0.05-0.00001-128-300_ld.h5", Dict(
-    "R_num" => R_num,
-    "R_lin" => R_lin,
-    "R_gen" => R_gen,
-    "S" => S,
-    "M" => M,
-    "obs_trj" => obs_trj,
-    "score_trj" => score_trj,
-    "σ_value" => σ_value,
-    "averages" => averages,
-    "centers" => centers,
-    "Nc" => Nc,
-    "kde_clustered_1_x" => [kde_clustered_1.x...],
-    "kde_clustered_1_density" => kde_clustered_1.density,
-    "kde_true_1_x" => [kde_true_1.x...],
-    "kde_true_1_density" => kde_true_1.density,
-    "kde_clustered_2_x" => [kde_clustered_2.x...],
-    "kde_clustered_2_density" => kde_clustered_2.density,
-    "kde_true_2_x" => [kde_true_2.x...],
-    "kde_true_2_density" => kde_true_2.density,
-    "kde_clustered_3_x" => [kde_clustered_3.x...],
-    "kde_clustered_3_density" => kde_clustered_3.density,
-    "kde_true_3_x" => [kde_true_3.x...],
-    "kde_true_3_density" => kde_true_3.density,
-    "kde_clustered_4_x" => [kde_clustered_4.x...],
-    "kde_clustered_4_density" => kde_clustered_4.density,
-    "kde_true_4_x" => [kde_true_4.x...],
-    "kde_true_4_density" => kde_true_4.density,
-    "kde_clustered_5_x" => [kde_clustered_5.x...],
-    "kde_clustered_5_density" => kde_clustered_5.density,
-    "kde_true_5_x" => [kde_true_5.x...],
-    "kde_true_5_density" => kde_true_5.density,
-    "kde_clustered_6_x" => [kde_clustered_6.x...],
-    "kde_clustered_6_density" => kde_clustered_6.density,
-    "kde_true_6_x" => [kde_true_6.x...],
-    "kde_true_6_density" => kde_true_6.density,
-    "dt" => dt,
-    "Nsteps" => Nsteps,
-    "ϵ" => ϵ,
-    "res_trj" => res_trj,
-    "n_tau" => n_tau
-))
+# save_variables_to_hdf5("data/HOR_data/CdV_results_ld_0.05-0.00001-128-300_ld.h5", Dict(
+#     "R_num" => R_num,
+#     "R_lin" => R_lin,
+#     "R_gen" => R_gen,
+#     "S" => S,
+#     "M" => M,
+#     "obs_trj" => obs_trj,
+#     "score_trj" => score_trj,
+#     "σ_value" => σ_value,
+#     "averages" => averages,
+#     "centers" => centers,
+#     "Nc" => Nc,
+#     "kde_clustered_1_x" => [kde_clustered_1.x...],
+#     "kde_clustered_1_density" => kde_clustered_1.density,
+#     "kde_true_1_x" => [kde_true_1.x...],
+#     "kde_true_1_density" => kde_true_1.density,
+#     "kde_clustered_2_x" => [kde_clustered_2.x...],
+#     "kde_clustered_2_density" => kde_clustered_2.density,
+#     "kde_true_2_x" => [kde_true_2.x...],
+#     "kde_true_2_density" => kde_true_2.density,
+#     "kde_clustered_3_x" => [kde_clustered_3.x...],
+#     "kde_clustered_3_density" => kde_clustered_3.density,
+#     "kde_true_3_x" => [kde_true_3.x...],
+#     "kde_true_3_density" => kde_true_3.density,
+#     "kde_clustered_4_x" => [kde_clustered_4.x...],
+#     "kde_clustered_4_density" => kde_clustered_4.density,
+#     "kde_true_4_x" => [kde_true_4.x...],
+#     "kde_true_4_density" => kde_true_4.density,
+#     "kde_clustered_5_x" => [kde_clustered_5.x...],
+#     "kde_clustered_5_density" => kde_clustered_5.density,
+#     "kde_true_5_x" => [kde_true_5.x...],
+#     "kde_true_5_density" => kde_true_5.density,
+#     "kde_clustered_6_x" => [kde_clustered_6.x...],
+#     "kde_clustered_6_density" => kde_clustered_6.density,
+#     "kde_true_6_x" => [kde_true_6.x...],
+#     "kde_true_6_density" => kde_true_6.density,
+#     "dt" => dt,
+#     "Nsteps" => Nsteps,
+#     "ϵ" => ϵ,
+#     "res_trj" => res_trj,
+#     "n_tau" => n_tau
+# ))
 
 ##
 
@@ -427,7 +427,7 @@ fig = Figure(resolution=(1800, 2200), font="CMU Serif", fontsize=24)
 
 # Define common elements
 colors = [:blue, :black, :red]
-labels = ["Numerical", "Gaussian", "KGMM"]
+labels = ["Dynamical", "Gaussian", "KGMM"]
 time_axis = 0:dt*res_trj:n_tau*dt*res_trj
 
 # Create standard normal PDF function for the "linear" model

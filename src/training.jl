@@ -117,7 +117,7 @@ Swish activation function: x * sigmoid(x)
 - Activated value
 """
 function swish(x)
-    return x * sigmoid(x)
+    return x .* sigmoid.(x)
 end
 
 """
@@ -181,17 +181,20 @@ Train a new neural network with vanilla score matching loss.
 - `last_activation`: Output activation (default: identity)
 - `ϵ`: Minimum time value (default: 0.05)
 - `use_gpu`: Whether to use GPU acceleration (default: true)
+- `verbose`: Whether to show progress bar and device info (default: false)
 
 # Returns
 - Tuple of (trained model, loss history)
 """
 function train(obs, n_epochs, batch_size, neurons::Vector{Int}, σ; 
                opt=Flux.Adam(0.001), activation=swish, last_activation=identity, 
-               ϵ=0.05, use_gpu=true)
+               ϵ=0.05, use_gpu=true, verbose=false)
     
     # Setup compute device
     device = (use_gpu && CUDA.functional()) ? gpu : cpu
-    println("Using $(device === gpu ? "GPU" : "CPU")")
+    if verbose
+        println("Using $(device === gpu ? "GPU" : "CPU")")
+    end
     
     # Create model and move to device
     nn = create_nn(neurons, activation=activation, last_activation=last_activation) |> device
@@ -203,7 +206,8 @@ function train(obs, n_epochs, batch_size, neurons::Vector{Int}, σ;
     losses = []
     
     # Training loop
-    for epoch in ProgressBar(1:n_epochs) 
+    epoch_iterator = verbose ? ProgressBar(1:n_epochs) : (1:n_epochs)
+    for epoch in epoch_iterator 
         # Generate batch data based on sampling method
         if isa(σ, Float64)      # Langevin sampling method
             inputs, targets = generate_data(obs, σ)
@@ -241,11 +245,13 @@ end
 
 function train(obs, n_epochs, batch_size, neurons::Vector{Int}, σ, time_dim; 
                opt=Flux.Adam(0.001), activation=swish, last_activation=identity, 
-               ϵ=0.05, use_gpu=true)
+               ϵ=0.05, use_gpu=true, verbose=false)
     
     # Setup compute device
     device = (use_gpu && CUDA.functional()) ? gpu : cpu
-    println("Using $(device === gpu ? "GPU" : "CPU")")
+    if verbose
+        println("Using $(device === gpu ? "GPU" : "CPU")")
+    end
     
     # Create model and move to device
     nn = create_nn(neurons, activation=activation, last_activation=last_activation) |> device
@@ -257,7 +263,8 @@ function train(obs, n_epochs, batch_size, neurons::Vector{Int}, σ, time_dim;
     losses = []
     
     # Training loop
-    for epoch in ProgressBar(1:n_epochs) 
+    epoch_iterator = verbose ? ProgressBar(1:n_epochs) : (1:n_epochs)
+    for epoch in epoch_iterator 
         # Generate batch data based on sampling method
         if isa(σ, Float64)      # Langevin sampling method
             inputs, targets = generate_data(obs, σ)
@@ -307,16 +314,19 @@ Continue training an existing neural network with vanilla score matching loss.
 - `opt`: Optimizer (default: Adam(0.001))
 - `ϵ`: Minimum time value (default: 0.05)
 - `use_gpu`: Whether to use GPU acceleration (default: true)
+- `verbose`: Whether to show progress bar and device info (default: false)
 
 # Returns
 - Tuple of (trained model, loss history)
 """
 function train(obs, n_epochs, batch_size, nn::Chain, σ; 
-               opt=Flux.Adam(0.001), ϵ=0.05, use_gpu=true)
+               opt=Flux.Adam(0.001), ϵ=0.05, use_gpu=true, verbose=false)
     
     # Setup compute device
     device = (use_gpu && CUDA.functional()) ? gpu : cpu
-    println("Using $(device === gpu ? "GPU" : "CPU")")
+    if verbose
+        println("Using $(device === gpu ? "GPU" : "CPU")")
+    end
     
     # Move model to device
     nn = nn |> device
@@ -328,7 +338,8 @@ function train(obs, n_epochs, batch_size, nn::Chain, σ;
     losses = []
     
     # Training loop
-    for epoch in ProgressBar(1:n_epochs) 
+    epoch_iterator = verbose ? ProgressBar(1:n_epochs) : (1:n_epochs)
+    for epoch in epoch_iterator 
         # Generate batch data based on sampling method
         if isa(σ, Float64)     # Langevin sampling method
             inputs, targets = generate_data(obs, σ)
@@ -378,16 +389,19 @@ Train a neural network with pre-clustered data.
 - `activation`: Activation function (default: swish)
 - `last_activation`: Output activation (default: identity)
 - `use_gpu`: Whether to use GPU acceleration (default: true)
+- `verbose`: Whether to show progress bar and device info (default: false)
 
 # Returns
 - Tuple of (trained model, loss history)
 """
 function train(obs, n_epochs, batch_size, neurons; 
-               opt=Flux.Adam(0.001), activation=swish, last_activation=identity, use_gpu=true)
+               opt=Flux.Adam(0.001), activation=swish, last_activation=identity, use_gpu=true, verbose=false)
     
     # Setup compute device
     device = (use_gpu && CUDA.functional()) ? gpu : cpu
-    println("Using $(device === gpu ? "GPU" : "CPU")")
+    if verbose
+        println("Using $(device === gpu ? "GPU" : "CPU")")
+    end
     
     # Create model and move to device
     nn = create_nn(neurons, activation=activation, last_activation=last_activation) |> device
@@ -404,7 +418,8 @@ function train(obs, n_epochs, batch_size, neurons;
     targets = Float32.(targets)
     
     # Training loop
-    for epoch in ProgressBar(1:n_epochs) 
+    epoch_iterator = verbose ? ProgressBar(1:n_epochs) : (1:n_epochs)
+    for epoch in epoch_iterator 
         # Create data loader (data already converted to Float32)
         data_loader = Flux.DataLoader((inputs, targets), batchsize=batch_size, shuffle=true) 
         epoch_loss = 0.0
@@ -434,7 +449,7 @@ function train(obs, n_epochs, batch_size, neurons;
 end
 
 """
-    check_loss(obs, nn, σ; ϵ=0.05, n_samples=1)
+    check_loss(obs, nn, σ; ϵ=0.05, n_samples=1, verbose=false)
 
 Evaluate loss on random batches of data.
 
@@ -444,15 +459,17 @@ Evaluate loss on random batches of data.
 - `σ`: Noise standard deviation (scalar or function)
 - `ϵ`: Minimum time value (default: 0.05)
 - `n_samples`: Number of evaluation batches (default: 1)
+- `verbose`: Whether to show progress bar (default: false)
 
 # Returns
 - Average loss across evaluation batches
 """
-function check_loss(obs, nn, σ; ϵ=0.05, n_samples=1)
+function check_loss(obs, nn, σ; ϵ=0.05, n_samples=1, verbose=false)
     loss = 0.0
     
     # Average loss over multiple samples
-    for _ in ProgressBar(1:n_samples) 
+    sample_iterator = verbose ? ProgressBar(1:n_samples) : (1:n_samples)
+    for _ in sample_iterator 
         # Generate evaluation data
         if isa(σ, Float64)
             inputs, targets = generate_data(obs, σ)
@@ -469,7 +486,7 @@ end
 
 """
     train_with_early_stopping(obs, n_epochs, batch_size, neurons::Vector{Int}, σ; 
-                             validation_split=0.1, patience=10, kwargs...)
+                             validation_split=0.1, patience=10, verbose=false, kwargs...)
 
 Train with early stopping based on validation loss.
 
@@ -481,13 +498,14 @@ Train with early stopping based on validation loss.
 - `σ`: Noise standard deviation (scalar or function)
 - `validation_split`: Fraction of data to use for validation (default: 0.1)
 - `patience`: Number of epochs with no improvement before stopping (default: 10)
+- `verbose`: Whether to print epoch progress and early stopping info (default: false)
 - Additional keyword arguments passed to the main train function
 
 # Returns
 - Tuple of (best model, training loss history, validation loss history)
 """
 function train_with_early_stopping(obs, n_epochs, batch_size, neurons::Vector{Int}, σ; 
-                                  validation_split=0.1, patience=10, kwargs...)
+                                  validation_split=0.1, patience=10, verbose=false, kwargs...)
     
     # Split data into training and validation sets
     n_samples = size(obs, 2)
@@ -514,14 +532,16 @@ function train_with_early_stopping(obs, n_epochs, batch_size, neurons::Vector{In
     # Training loop with early stopping
     for epoch in 1:n_epochs
         # Train for one epoch
-        nn, epoch_loss = train(train_obs, 1, batch_size, nn, σ; kwargs...)
+        nn, epoch_loss = train(train_obs, 1, batch_size, nn, σ; verbose=false, kwargs...)
         push!(train_losses, epoch_loss[1])
         
         # Evaluate on validation set
-        val_loss = check_loss(val_obs, nn, σ; n_samples=1)
+        val_loss = check_loss(val_obs, nn, σ; n_samples=1, verbose=false)
         push!(val_losses, val_loss)
         
-        println("Epoch $epoch: Train loss = $(epoch_loss[1]), Val loss = $val_loss")
+        if verbose
+            println("Epoch $epoch: Train loss = $(epoch_loss[1]), Val loss = $val_loss")
+        end
         
         # Check if validation loss improved
         if val_loss < best_val_loss
@@ -531,7 +551,9 @@ function train_with_early_stopping(obs, n_epochs, batch_size, neurons::Vector{In
         else
             epochs_no_improve += 1
             if epochs_no_improve >= patience
-                println("Early stopping triggered after $epoch epochs")
+                if verbose
+                    println("Early stopping triggered after $epoch epochs")
+                end
                 break
             end
         end

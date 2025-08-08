@@ -13,13 +13,55 @@ function save_model(nn, filename)
         filename = filename * ".bson"
     end
     
-    # Extract model parameters
-    model_params = Flux.params(nn)
+    # Create directory if it doesn't exist
+    mkpath(dirname(filename))
     
-    # Save model architecture and parameters
-    BSON.@save filename model=nn params=model_params
+    try
+        # Try the modern approach with state dict
+        model_state = Flux.state(nn)
+        BSON.@save filename model_state=model_state
+        println("Model saved to $filename (using state dict)")
+    catch e1
+        try
+            # Fallback: Extract just the parameters
+            model_params = [p for p in Flux.params(nn)]
+            BSON.@save filename model_params=model_params
+            println("Model saved to $filename (using parameters only)")
+            @warn "Saved parameters only. You'll need to reconstruct the model architecture manually."
+        catch e2
+            # Final fallback: try with HDF5
+            try
+                h5_filename = replace(filename, ".bson" => ".h5")
+                save_model_hdf5(nn, h5_filename)
+                println("Model saved to $h5_filename (using HDF5)")
+            catch e3
+                error("Failed to save model with all methods. BSON error: $e1, Params error: $e2, HDF5 error: $e3")
+            end
+        end
+    end
+end
+
+"""
+    save_model_hdf5(nn, filename)
+
+Save a Flux model to HDF5 format (more robust alternative).
+"""
+function save_model_hdf5(nn, filename)
+    # Create directory if it doesn't exist
+    mkpath(dirname(filename))
     
-    println("Model saved to $filename")
+    # Extract parameters as arrays
+    params = Flux.params(nn)
+    param_arrays = [Array(p) for p in params]
+    
+    # Save to HDF5
+    h5open(filename, "w") do file
+        file["num_params"] = length(param_arrays)
+        for (i, param) in enumerate(param_arrays)
+            file["param_$i"] = param
+            file["param_$(i)_size"] = collect(size(param))
+        end
+    end
 end
 
 """
@@ -34,22 +76,182 @@ Load a Flux model from disk.
 - Loaded neural network model
 """
 function load_model(filename)
-    # Ensure filename has .bson extension
-    if !endswith(filename, ".bson")
-        filename = filename * ".bson"
+    # Check if file exists with .bson extension
+    bson_filename = endswith(filename, ".bson") ? filename : filename * ".bson"
+    h5_filename = replace(bson_filename, ".bson" => ".h5")
+    
+    if isfile(bson_filename)
+        try
+            # Try loading from BSON
+            model_data = BSON.load(bson_filename)
+            
+            if haskey(model_data, :model_state)
+                # Modern approach with state dict
+                @warn "Loading with state dict not fully implemented. Please reconstruct model manually."
+                return model_data[:model_state]
+            elseif haskey(model_data, :model_params)
+                # Parameters only
+                @warn "Loaded parameters only. You need to reconstruct the model architecture manually."
+                return model_data[:model_params]
+            else
+                # Legacy approach
+                model = model_data[:model]
+                if haskey(model_data, :params)
+                    params = model_data[:params]
+                    Flux.loadparams!(model, params)
+                end
+                println("Model loaded from $bson_filename")
+                return model
+            end
+        catch e
+            @warn "Failed to load BSON file: $e. Trying HDF5..."
+        end
     end
     
-    # Load model data
-    model_data = BSON.load(filename)
+    if isfile(h5_filename)
+        @warn "HDF5 loading returns parameters only. Reconstruct model architecture manually."
+        return load_model_hdf5(h5_filename)
+    end
     
-    # Extract model and parameters
-    model = model_data[:model]
-    params = model_data[:params]
+    error("Neither $bson_filename nor $h5_filename exists")
+end
+
+"""
+    load_model_hdf5(filename)
+
+Load model parameters from HDF5 format.
+"""
+function load_model_hdf5(filename)
+    param_arrays = []
     
-    # Restore parameters
-    Flux.loadparams!(model, params)
+    h5open(filename, "r") do file
+        num_params = read(file["num_params"])
+        for i in 1:num_params
+            param_data = read(file["param_$i"])
+            push!(param_arrays, param_data)
+        end
+    end
     
-    println("Model loaded from $filename")
+    return param_arrays
+end
+
+"""
+    save_model_safe(nn, filename, architecture)
+
+Save a Flux model with architecture information for safe reconstruction.
+
+# Arguments
+- `nn`: Neural network model
+- `filename`: Output filename
+- `architecture`: Array describing layer sizes, e.g., [1, 50, 25, 1]
+"""
+function save_model_safe(nn, filename, architecture; activation=swish, last_activation=identity)
+    # Create directory if it doesn't exist
+    mkpath(dirname(filename))
+    
+    # Ensure filename has .h5 extension for this safe method
+    if !endswith(filename, ".h5")
+        filename = filename * ".h5"
+    end
+    
+    # Extract parameters as arrays
+    params = Flux.params(nn)
+    param_arrays = [Array(p) for p in params]
+    
+    # Save to HDF5 with architecture info
+    h5open(filename, "w") do file
+        # Save architecture
+        file["architecture"] = architecture
+        file["num_params"] = length(param_arrays)
+        
+        # Save activation function names
+        file["activation"] = string(activation)
+        file["last_activation"] = string(last_activation)
+        
+        # Save parameters
+        for (i, param) in enumerate(param_arrays)
+            file["param_$i"] = param
+            file["param_$(i)_size"] = collect(size(param))
+        end
+    end
+    
+    println("Model safely saved to $filename")
+end
+
+"""
+    load_model_safe(filename)
+
+Load a model saved with save_model_safe, reconstructing the full architecture.
+"""
+function load_model_safe(filename)
+    # Ensure filename has .h5 extension
+    if !endswith(filename, ".h5")
+        filename = filename * ".h5"
+    end
+    
+    if !isfile(filename)
+        error("File $filename does not exist")
+    end
+    
+    param_arrays = []
+    architecture = nothing
+    activation_str = "swish"
+    last_activation_str = "identity"
+    
+    h5open(filename, "r") do file
+        # Load architecture and activation info
+        architecture = read(file["architecture"])
+        num_params = read(file["num_params"])
+        
+        if haskey(file, "activation")
+            activation_str = read(file["activation"])
+        end
+        if haskey(file, "last_activation")
+            last_activation_str = read(file["last_activation"])
+        end
+        
+        # Load parameters
+        for i in 1:num_params
+            param_data = read(file["param_$i"])
+            push!(param_arrays, param_data)
+        end
+    end
+    
+    # Reconstruct the model
+    activation_fn = activation_str == "swish" ? swish : 
+                   activation_str == "relu" ? relu :
+                   activation_str == "tanh" ? tanh :
+                   activation_str == "sigmoid" ? sigmoid : swish
+                   
+    last_activation_fn = last_activation_str == "identity" ? identity :
+                        last_activation_str == "relu" ? relu :
+                        last_activation_str == "tanh" ? tanh :
+                        last_activation_str == "sigmoid" ? sigmoid : identity
+    
+    # Build the model layers
+    layers = []
+    param_idx = 1
+    
+    for i in 1:(length(architecture)-1)
+        # Add dense layer
+        W = param_arrays[param_idx]
+        b = param_arrays[param_idx + 1]
+        
+        dense_layer = Dense(W, b)
+        push!(layers, dense_layer)
+        
+        # Add activation (except for last layer)
+        if i < length(architecture) - 1
+            push!(layers, activation_fn)
+        else
+            push!(layers, last_activation_fn)
+        end
+        
+        param_idx += 2
+    end
+    
+    model = Chain(layers...)
+    println("Model safely loaded from $filename")
     return model
 end
 
